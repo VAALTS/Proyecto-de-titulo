@@ -1,0 +1,47 @@
+{% extends 'administrador/base_admin.html' %}
+
+{% block title %}Menú del administrador{% endblock %}
+
+{% block content %}
+<div class="text-center mb-5">
+    <h2 class="fw-bold">Panel de administración</h2>
+    <p class="text-muted">Selecciona una opción para comenzar</p>
+</div>
+
+<div class="row g-4 justify-content-center">
+
+    <div class="col-12 col-md-4">
+        <div class="card menu-card h-100 text-center p-4">
+            <div class="card-body d-flex flex-column">
+                <i class="bi bi-people-fill menu-icon text-primary"></i>
+                <h4 class="card-title mt-3">Gestión de alumnos</h4>
+                <p class="text-muted">Administra las cuentas y la información de los alumnos.</p>
+                <a href="{% url 'gestion_alumnos' %}" class="btn btn-primary mt-auto">Ingresar</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12 col-md-4">
+        <div class="card menu-card h-100 text-center p-4">
+            <div class="card-body d-flex flex-column">
+                <i class="bi bi-person-workspace menu-icon text-success"></i>
+                <h4 class="card-title mt-3">Gestión de profesores</h4>
+                <p class="text-muted">Administra las cuentas y la información de los profesores.</p>
+                <a href="{% url 'gestion_profesores' %}" class="btn btn-success mt-auto">Ingresar</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12 col-md-4">
+        <div class="card menu-card h-100 text-center p-4">
+            <div class="card-body d-flex flex-column">
+                <i class="bi bi-journal-bookmark-fill menu-icon text-warning"></i>
+                <h4 class="card-title mt-3">Gestión de cursos</h4>
+                <p class="text-muted">Crea y administra los cursos de capacitación.</p>
+                <a href="{% url 'gestion_cursos' %}" class="btn btn-warning mt-auto">Ingresar</a>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

@@ -1,0 +1,18 @@
+{% extends 'administrador/base_admin.html' %}
+
+{% block title %}Gestión de cursos{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="fw-bold mb-0"><i class="bi bi-journal-bookmark-fill text-warning me-2"></i>Gestión de cursos</h2>
+    <a href="{% url 'admin_menu' %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i>Volver al menú
+    </a>
+</div>
+
+<div class="card shadow-sm border-0">
+    <div class="card-body text-center text-muted py-5">
+        Aquí irá el listado y la administración de cursos.
+    </div>
+</div>
+{% endblock %}

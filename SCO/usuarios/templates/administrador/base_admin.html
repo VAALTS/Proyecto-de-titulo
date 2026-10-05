@@ -30,7 +30,7 @@
             </a>
             <div class="d-flex align-items-center text-white">
                 <span class="me-3 d-none d-sm-inline">
-                    <i class="bi bi-person-circle me-1"></i>{{ user.username }}
+                    <i class="bi bi-person-circle me-1"></i>{{ user.get_short_name }}
                 </span>
                 <form method="post" action="{% url 'logout' %}" class="m-0">
                     {% csrf_token %}

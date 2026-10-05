@@ -8,7 +8,7 @@
 </head>
 <body class="bg-light">
     <div class="container py-5 text-center">
-        <h1>¡Bienvenido, {{ user.username }}!</h1>
+        <h1>¡Bienvenido, {{ user.get_short_name }}!</h1>
         <p class="text-muted">Sesión iniciada correctamente.</p>
 
         <form method="post" action="{% url 'logout' %}">

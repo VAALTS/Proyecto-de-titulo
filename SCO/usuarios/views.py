@@ -4,9 +4,11 @@ from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.views.decorators.http import require_POST
 
+from .models import Rol
+
 
 def es_admin(user):
-    return user.is_active and user.is_staff
+    return user.is_authenticated and user.rol == Rol.ADMINISTRADOR
 
 
 # Solo deja pasar a administradores; al resto lo manda al login

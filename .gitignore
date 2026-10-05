@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Configuración local (credenciales y secretos)
+.env
+
+# Bases de datos locales
+*.sqlite3

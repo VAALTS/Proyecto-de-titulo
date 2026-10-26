@@ -7,6 +7,10 @@ urlpatterns = [
     path('login/', views.login_view, name='login'),
     path('logout/', views.logout_view, name='logout'),
 
+    # Inicio de profesor y alumno
+    path('profesor/', views.profesor_inicio_view, name='profesor_inicio'),
+    path('alumno/', views.alumno_inicio_view, name='alumno_inicio'),
+
     # Panel del administrador
     path('panel/', views.admin_menu_view, name='admin_menu'),
     path('panel/alumnos/', views.gestion_alumnos_view, name='gestion_alumnos'),

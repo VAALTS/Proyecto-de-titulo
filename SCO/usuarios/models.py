@@ -40,6 +40,10 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
     apellido_materno = models.CharField(max_length=50, blank=True)
     rol = models.CharField(max_length=15, choices=Rol.choices, default=Rol.ALUMNO)
 
+    # Bloqueo temporal por intentos fallidos de inicio de sesión (RF-01)
+    intentos_fallidos = models.PositiveSmallIntegerField(default=0)
+    bloqueado_hasta = models.DateTimeField(null=True, blank=True)
+
     is_active = models.BooleanField('activo', default=True)
     # Solo controla el acceso al sitio /admin/ de Django; el rol dentro de la plataforma es `rol`
     is_staff = models.BooleanField('acceso al sitio de administración', default=False)
@@ -73,3 +77,6 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
 
     def get_short_name(self):
         return ' '.join(parte for parte in [self.primer_nombre, self.apellido_paterno] if parte)
+
+    def esta_bloqueado(self):
+        return self.bloqueado_hasta is not None and self.bloqueado_hasta > timezone.now()

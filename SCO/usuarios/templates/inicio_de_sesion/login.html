@@ -8,7 +8,7 @@
     <style>
         body {
             min-height: 100vh;
-            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            background: linear-gradient(135deg, #ec2020, #fa9715);
         }
         .login-card {
             width: 100%;
@@ -22,36 +22,38 @@
         }
     </style>
 </head>
-<body class="d-flex align-items-center justify-content-center">
+<body class="d-flex align-items-center justify-content-center px-3">
 
     <div class="card login-card shadow-lg p-4">
         <div class="text-center mb-4">
-            <h3 class="brand">Capacitaciones Online</h3>
+            <h3 class="brand">Adapt Academy</h3>
             <p class="text-muted mb-0">Ingresa con tu cuenta</p>
         </div>
 
-        {% if messages %}
-            {% for message in messages %}
-                <div class="alert alert-danger py-2" role="alert">{{ message }}</div>
-            {% endfor %}
-        {% endif %}
+        {% for error in form.non_field_errors %}
+            <div class="alert alert-danger py-2" role="alert">{{ error }}</div>
+        {% endfor %}
 
         <form method="post" novalidate>
             {% csrf_token %}
+            {% if request.GET.next %}
+                <input type="hidden" name="next" value="{{ request.GET.next }}">
+            {% endif %}
 
             <div class="mb-3">
-                <label for="username" class="form-label">Correo electrónico</label>
-                <input type="email" class="form-control" id="username" name="username"
-                       placeholder="nombre@ejemplo.cl" required autofocus>
+                <label for="id_email" class="form-label">Correo electrónico</label>
+                <input type="email" class="form-control" id="id_email" name="email"
+                       value="{{ form.email.value|default_if_none:'' }}"
+                       placeholder="nombre@ejemplo.cl" autocomplete="username" required autofocus>
             </div>
 
             <div class="mb-4">
-                <label for="password" class="form-label">Contraseña</label>
-                <input type="password" class="form-control" id="password" name="password"
-                       placeholder="Tu contraseña" required>
+                <label for="id_password" class="form-label">Contraseña</label>
+                <input type="password" class="form-control" id="id_password" name="password"
+                       placeholder="Tu contraseña" autocomplete="current-password" required>
             </div>
 
-            <button type="submit" class="btn btn-primary w-100">Iniciar sesión</button>
+            <button type="submit" class="btn btn-primary w-100">Ingresar</button>
         </form>
     </div>
 

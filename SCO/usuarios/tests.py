@@ -1,7 +1,12 @@
+from datetime import timedelta
+
 from django.contrib.auth import authenticate
 from django.db import IntegrityError
 from django.test import TestCase
+from django.urls import reverse
+from django.utils import timezone
 
+from .forms import MENSAJE_CREDENCIALES
 from .models import Rol, Usuario
 
 
@@ -41,3 +46,81 @@ class UsuarioTests(TestCase):
     def test_alumno_sin_rut_es_rechazado_por_la_base_de_datos(self):
         with self.assertRaises(IntegrityError):
             self.crear_alumno(rut=None)
+
+
+class LoginTests(TestCase):
+    """RF-01: inicio de sesión con correo, redirección por rol y bloqueo tras 3 intentos fallidos."""
+
+    CLAVE = 'clave-segura-123'
+
+    def setUp(self):
+        self.admin = Usuario.objects.create_superuser('admin@ejemplo.cl', self.CLAVE, primer_nombre='Admin')
+        self.profesor = Usuario.objects.create_user('profe@ejemplo.cl', self.CLAVE, rut='22222222-2',
+                                                    primer_nombre='Pedro', apellido_paterno='Soto',
+                                                    rol=Rol.PROFESOR)
+        self.alumno = Usuario.objects.create_user('ana@ejemplo.cl', self.CLAVE, rut='11111111-1',
+                                                  primer_nombre='Ana', apellido_paterno='Pérez')
+
+    def ingresar(self, email, clave):
+        return self.client.post(reverse('login'), {'email': email, 'password': clave})
+
+    def test_cada_rol_es_redirigido_a_su_inicio(self):
+        for usuario, destino in [(self.admin, 'admin_menu'), (self.profesor, 'profesor_inicio'),
+                                 (self.alumno, 'alumno_inicio')]:
+            with self.subTest(rol=usuario.rol):
+                respuesta = self.client.post(reverse('login'), {'email': usuario.email, 'password': self.CLAVE},
+                                             follow=True)
+                self.assertRedirects(respuesta, reverse(destino))
+                self.client.logout()
+
+    def test_credenciales_incorrectas_muestran_el_mensaje_del_requerimiento(self):
+        respuesta = self.ingresar('ana@ejemplo.cl', 'mala')
+
+        self.assertContains(respuesta, MENSAJE_CREDENCIALES)
+        self.assertNotIn('_auth_user_id', self.client.session)
+
+    def test_un_correo_inexistente_muestra_el_mismo_mensaje(self):
+        self.assertContains(self.ingresar('nadie@ejemplo.cl', 'mala'), MENSAJE_CREDENCIALES)
+
+    def test_tres_intentos_fallidos_bloquean_la_cuenta(self):
+        self.ingresar('ana@ejemplo.cl', 'mala')
+        self.ingresar('ana@ejemplo.cl', 'mala')
+        respuesta = self.ingresar('ana@ejemplo.cl', 'mala')
+
+        self.assertContains(respuesta, 'bloqueada temporalmente')
+        self.alumno.refresh_from_db()
+        self.assertTrue(self.alumno.esta_bloqueado())
+
+    def test_la_cuenta_bloqueada_rechaza_incluso_la_clave_correcta(self):
+        self.alumno.bloqueado_hasta = timezone.now() + timedelta(minutes=5)
+        self.alumno.save()
+
+        respuesta = self.ingresar('ana@ejemplo.cl', self.CLAVE)
+
+        self.assertContains(respuesta, 'bloqueada temporalmente')
+        self.assertNotIn('_auth_user_id', self.client.session)
+
+    def test_pasado_el_bloqueo_se_puede_ingresar(self):
+        self.alumno.bloqueado_hasta = timezone.now() - timedelta(seconds=1)
+        self.alumno.save()
+
+        respuesta = self.ingresar('ana@ejemplo.cl', self.CLAVE)
+
+        self.assertRedirects(respuesta, reverse('home'), fetch_redirect_response=False)
+        self.alumno.refresh_from_db()
+        self.assertIsNone(self.alumno.bloqueado_hasta)
+
+    def test_un_ingreso_correcto_reinicia_los_intentos_fallidos(self):
+        self.ingresar('ana@ejemplo.cl', 'mala')
+        self.ingresar('ana@ejemplo.cl', 'mala')
+        self.ingresar('ana@ejemplo.cl', self.CLAVE)
+
+        self.alumno.refresh_from_db()
+        self.assertEqual(self.alumno.intentos_fallidos, 0)
+
+    def test_un_rol_no_entra_a_la_pagina_de_otro(self):
+        self.client.force_login(self.alumno)
+
+        self.assertRedirects(self.client.get(reverse('admin_menu')), f"{reverse('login')}?next={reverse('admin_menu')}",
+                             fetch_redirect_response=False)
+        self.assertEqual(self.client.get(reverse('profesor_inicio')).status_code, 302)

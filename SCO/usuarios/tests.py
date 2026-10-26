@@ -170,6 +170,41 @@ class LogoutTests(TestCase):
         self.assertIn('no-store', respuesta['Cache-Control'])
 
 
+class MenuAdministradorTests(TestCase):
+    """RF-03: menú del administrador con accesos a las tres gestiones."""
+
+    GESTIONES = [('gestion_alumnos', 'Gestión de alumnos'), ('gestion_profesores', 'Gestión de profesores'),
+                 ('gestion_cursos', 'Gestión de cursos')]
+
+    def setUp(self):
+        self.admin = Usuario.objects.create_superuser('admin@ejemplo.cl', 'clave-segura-123', primer_nombre='Admin')
+        self.client.force_login(self.admin)
+
+    def test_el_menu_tiene_un_boton_por_cada_gestion(self):
+        respuesta = self.client.get(reverse('admin_menu'))
+
+        for nombre_url, titulo in self.GESTIONES:
+            with self.subTest(gestion=titulo):
+                self.assertContains(respuesta, titulo)
+                self.assertContains(respuesta, f'href="{reverse(nombre_url)}"')
+
+    def test_cada_boton_lleva_a_su_ventana_y_esta_permite_volver(self):
+        for nombre_url, titulo in self.GESTIONES:
+            with self.subTest(gestion=titulo):
+                respuesta = self.client.get(reverse(nombre_url))
+                self.assertContains(respuesta, f'<title>{titulo}</title>', html=True)
+                self.assertContains(respuesta, f'href="{reverse("admin_menu")}"')
+
+    def test_profesores_y_alumnos_no_entran_a_las_gestiones(self):
+        profesor = Usuario.objects.create_user('profe@ejemplo.cl', 'clave-segura-123', rut='22222222-2',
+                                               primer_nombre='Pedro', apellido_paterno='Soto', rol=Rol.PROFESOR)
+        self.client.force_login(profesor)
+
+        for nombre_url in ['admin_menu'] + [nombre for nombre, _ in self.GESTIONES]:
+            with self.subTest(pagina=nombre_url):
+                self.assertEqual(self.client.get(reverse(nombre_url)).status_code, 302)
+
+
 class CambioContrasenaTests(TestCase):
     """RF-08: cambio de contraseña desde el perfil."""
 

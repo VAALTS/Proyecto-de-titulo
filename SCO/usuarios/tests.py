@@ -124,3 +124,47 @@ class LoginTests(TestCase):
         self.assertRedirects(self.client.get(reverse('admin_menu')), f"{reverse('login')}?next={reverse('admin_menu')}",
                              fetch_redirect_response=False)
         self.assertEqual(self.client.get(reverse('profesor_inicio')).status_code, 302)
+
+
+class LogoutTests(TestCase):
+    """RF-02: cierre de sesión desde un menú desplegable presente en todas las páginas."""
+
+    def setUp(self):
+        self.admin = Usuario.objects.create_superuser('admin@ejemplo.cl', 'clave-segura-123', primer_nombre='Admin')
+        self.profesor = Usuario.objects.create_user('profe@ejemplo.cl', 'clave-segura-123', rut='22222222-2',
+                                                    primer_nombre='Pedro', apellido_paterno='Soto',
+                                                    rol=Rol.PROFESOR)
+        self.alumno = Usuario.objects.create_user('ana@ejemplo.cl', 'clave-segura-123', rut='11111111-1',
+                                                  primer_nombre='Ana', apellido_paterno='Pérez')
+
+    def test_todas_las_paginas_tienen_el_menu_con_cierre_de_sesion(self):
+        paginas = [(self.admin, 'admin_menu'), (self.admin, 'gestion_alumnos'), (self.admin, 'gestion_profesores'),
+                   (self.admin, 'gestion_cursos'), (self.profesor, 'profesor_inicio'), (self.alumno, 'alumno_inicio')]
+        for usuario, pagina in paginas:
+            with self.subTest(pagina=pagina):
+                self.client.force_login(usuario)
+                respuesta = self.client.get(reverse(pagina))
+                self.assertContains(respuesta, 'data-bs-toggle="dropdown"')
+                self.assertContains(respuesta, f'action="{reverse("logout")}"')
+
+    def test_cerrar_sesion_termina_la_sesion_y_vuelve_al_login(self):
+        self.client.force_login(self.alumno)
+
+        respuesta = self.client.post(reverse('logout'))
+
+        self.assertRedirects(respuesta, reverse('login'))
+        self.assertNotIn('_auth_user_id', self.client.session)
+        self.assertEqual(self.client.get(reverse('alumno_inicio')).status_code, 302)
+
+    def test_cerrar_sesion_solo_acepta_post(self):
+        self.client.force_login(self.alumno)
+
+        self.assertEqual(self.client.get(reverse('logout')).status_code, 405)
+        self.assertIn('_auth_user_id', self.client.session)
+
+    def test_las_paginas_privadas_no_quedan_en_cache(self):
+        self.client.force_login(self.alumno)
+
+        respuesta = self.client.get(reverse('alumno_inicio'))
+
+        self.assertIn('no-store', respuesta['Cache-Control'])

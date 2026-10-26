@@ -2,17 +2,215 @@
 
 {% block title %}Gestión de alumnos{% endblock %}
 
+{% block extra_css %}
+{{ block.super }}
+<style>
+    .lista-alumnos { max-height: 60vh; overflow-y: auto; }
+    .lista-alumnos thead th { position: sticky; top: 0; z-index: 1; }
+    .fila-alumno { cursor: pointer; }
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-4">
     <h2 class="fw-bold mb-0"><i class="bi bi-people-fill text-primary me-2"></i>Gestión de alumnos</h2>
-    <a href="{% url 'admin_menu' %}" class="btn btn-outline-secondary">
-        <i class="bi bi-arrow-left me-1"></i>Volver al menú
-    </a>
+    <div class="d-flex gap-2">
+        <a href="{% url 'admin_menu' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left me-1"></i>Volver al menú
+        </a>
+        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#modalRegistro">
+            <i class="bi bi-person-plus-fill me-1"></i>Registrar alumno
+        </button>
+    </div>
 </div>
 
 <div class="card shadow-sm border-0">
-    <div class="card-body text-center text-muted py-5">
-        Aquí irá el listado y la administración de alumnos.
+    <div class="card-body">
+        <form method="get" class="d-flex gap-2 mb-3" role="search">
+            <input type="search" name="q" value="{{ q }}" class="form-control"
+                   placeholder="Buscar por nombre, apellido, RUT o correo" aria-label="Buscar alumno">
+            <button type="submit" class="btn btn-outline-primary"><i class="bi bi-search"></i></button>
+            {% if q %}
+                <a href="{% url 'gestion_alumnos' %}" class="btn btn-outline-secondary" title="Limpiar búsqueda">
+                    <i class="bi bi-x-lg"></i>
+                </a>
+            {% endif %}
+        </form>
+
+        <p class="text-muted small mb-2">
+            {{ alumnos|length }} alumno{{ alumnos|length|pluralize }}{% if q %} encontrado{{ alumnos|length|pluralize }} para «{{ q }}»{% endif %}.
+            Haz clic en un alumno para editar sus datos.
+        </p>
+
+        <div class="lista-alumnos border rounded">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>RUT</th>
+                        <th>Nombre</th>
+                        <th class="d-none d-md-table-cell">Correo</th>
+                        <th>Estado</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for alumno in alumnos %}
+                        <tr class="fila-alumno{% if not alumno.is_active %} text-muted{% endif %}" tabindex="0"
+                            data-nombre="{{ alumno.get_short_name }}" data-activo="{{ alumno.is_active|yesno:'1,0' }}"
+                            data-url-editar="{% url 'alumno_editar' alumno.pk %}"
+                            data-url-estado="{% url 'alumno_estado' alumno.pk %}"
+                            data-url-reenviar="{% url 'alumno_reenviar_clave' alumno.pk %}"
+                            data-rut="{{ alumno.rut }}" data-primer_nombre="{{ alumno.primer_nombre }}"
+                            data-segundo_nombre="{{ alumno.segundo_nombre }}"
+                            data-apellido_paterno="{{ alumno.apellido_paterno }}"
+                            data-apellido_materno="{{ alumno.apellido_materno }}" data-email="{{ alumno.email }}">
+                            <td class="text-nowrap">{{ alumno.rut }}</td>
+                            <td>{{ alumno.get_full_name }}</td>
+                            <td class="d-none d-md-table-cell text-break">{{ alumno.email }}</td>
+                            <td>
+                                {% if alumno.is_active %}
+                                    <span class="badge text-bg-success">Activo</span>
+                                {% else %}
+                                    <span class="badge text-bg-secondary">Inactivo</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="4" class="text-center text-muted py-4">
+                                {% if q %}No hay alumnos que coincidan con la búsqueda.{% else %}Aún no hay alumnos registrados.{% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>
+
+{# Registro #}
+<div class="modal fade" id="modalRegistro" tabindex="-1" aria-labelledby="tituloRegistro" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="tituloRegistro"><i class="bi bi-person-plus-fill me-2"></i>Registrar alumno</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <form method="post" action="{% url 'alumno_registrar' %}" id="formRegistro" novalidate
+                      data-confirmar="¿Está seguro de registrar a este alumno? Se le enviará una contraseña temporal a su correo.">
+                    {% csrf_token %}
+                    <input type="hidden" name="q" value="{{ q }}">
+                    {% include 'administrador/_campos_formulario.html' with form=form_registro %}
+                </form>
+                <p class="small text-muted mt-3 mb-0">
+                    <i class="bi bi-envelope me-1"></i>El sistema generará una contraseña temporal y la enviará al correo asociado.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" form="formRegistro" class="btn btn-primary">Registrar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Edición: los datos y las direcciones se cargan desde la fila seleccionada #}
+<div class="modal fade" id="modalEdicion" tabindex="-1" aria-labelledby="tituloEdicion" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="tituloEdicion">
+                    <i class="bi bi-pencil-square me-2"></i>Editar alumno: <span id="nombreEdicion">{{ alumno_editado.get_short_name }}</span>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <form method="post" id="formEdicion" novalidate
+                      {% if alumno_editado %}action="{% url 'alumno_editar' alumno_editado.pk %}"{% endif %}
+                      data-confirmar="¿Está seguro de guardar los cambios de este alumno?">
+                    {% csrf_token %}
+                    <input type="hidden" name="q" value="{{ q }}">
+                    {% include 'administrador/_campos_formulario.html' with form=form_edicion %}
+                </form>
+
+                <hr>
+                <h6 class="fw-semibold">Cuenta</h6>
+                <div class="d-flex flex-wrap gap-2">
+                    <form method="post" id="formReenviar" class="m-0"
+                          {% if alumno_editado %}action="{% url 'alumno_reenviar_clave' alumno_editado.pk %}"{% endif %}
+                          data-confirmar="¿Está seguro de enviar una nueva contraseña temporal? La contraseña actual del alumno dejará de funcionar.">
+                        {% csrf_token %}
+                        <input type="hidden" name="q" value="{{ q }}">
+                        <button type="submit" class="btn btn-outline-secondary btn-sm">
+                            <i class="bi bi-envelope-arrow-up me-1"></i>Reenviar contraseña temporal
+                        </button>
+                    </form>
+                    <form method="post" id="formEstado" class="m-0"
+                          {% if alumno_editado %}action="{% url 'alumno_estado' alumno_editado.pk %}"{% endif %}>
+                        {% csrf_token %}
+                        <input type="hidden" name="q" value="{{ q }}">
+                        <button type="submit" class="btn btn-sm" id="botonEstado"></button>
+                    </form>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" form="formEdicion" class="btn btn-primary">Guardar cambios</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ abrir_modal|json_script:"abrir-modal" }}
+<script>
+    (() => {
+        const formEdicion = document.getElementById('formEdicion');
+        const formReenviar = document.getElementById('formReenviar');
+        const formEstado = document.getElementById('formEstado');
+        const botonEstado = document.getElementById('botonEstado');
+        const modalEdicion = bootstrap.Modal.getOrCreateInstance(document.getElementById('modalEdicion'));
+
+        function mostrarEstado(activo) {
+            // Un alumno inactivo no puede recibir una contraseña nueva hasta que se reactive
+            formReenviar.classList.toggle('d-none', !activo);
+            botonEstado.className = 'btn btn-sm ' + (activo ? 'btn-outline-danger' : 'btn-outline-success');
+            botonEstado.innerHTML = activo
+                ? '<i class="bi bi-person-slash me-1"></i>Desactivar cuenta'
+                : '<i class="bi bi-person-check me-1"></i>Reactivar cuenta';
+            formEstado.dataset.confirmar = activo
+                ? '¿Está seguro de desactivar esta cuenta? El alumno no podrá ingresar, pero se conservará su historial.'
+                : '¿Está seguro de reactivar esta cuenta? El alumno podrá volver a ingresar.';
+        }
+
+        function abrirEdicion(fila) {
+            document.getElementById('nombreEdicion').textContent = fila.dataset.nombre;
+            formEdicion.action = fila.dataset.urlEditar;
+            formReenviar.action = fila.dataset.urlReenviar;
+            formEstado.action = fila.dataset.urlEstado;
+            // Limpia los errores de un intento anterior y carga los datos guardados
+            formEdicion.querySelectorAll('.alert, .invalid-feedback').forEach((error) => error.remove());
+            formEdicion.querySelectorAll('.is-invalid').forEach((campo) => campo.classList.remove('is-invalid'));
+            formEdicion.querySelectorAll('input[name]:not([type=hidden])').forEach((campo) => {
+                campo.value = fila.dataset[campo.name] || '';
+            });
+            mostrarEstado(fila.dataset.activo === '1');
+            modalEdicion.show();
+        }
+
+        document.querySelectorAll('.fila-alumno').forEach((fila) => {
+            fila.addEventListener('click', () => abrirEdicion(fila));
+            fila.addEventListener('keydown', (evento) => {
+                if (evento.key === 'Enter') abrirEdicion(fila);
+            });
+        });
+
+        {% if alumno_editado %}mostrarEstado({{ alumno_editado.is_active|yesno:'true,false' }});{% endif %}
+
+        // Si el servidor devolvió un formulario con errores, se vuelve a abrir su modal
+        const abrir = JSON.parse(document.getElementById('abrir-modal').textContent);
+        if (abrir) bootstrap.Modal.getOrCreateInstance(document.getElementById(abrir)).show();
+    })();
+</script>
 {% endblock %}

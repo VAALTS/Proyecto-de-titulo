@@ -1,6 +1,10 @@
+import re
 from datetime import timedelta
+from unittest import mock
 
 from django.contrib.auth import authenticate
+from django.core import mail
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.test import TestCase
 from django.urls import reverse
@@ -8,6 +12,7 @@ from django.utils import timezone
 
 from .forms import MENSAJE_CREDENCIALES
 from .models import Rol, Usuario
+from .rut import normalizar_rut
 
 
 class UsuarioTests(TestCase):
@@ -203,6 +208,179 @@ class MenuAdministradorTests(TestCase):
         for nombre_url in ['admin_menu'] + [nombre for nombre, _ in self.GESTIONES]:
             with self.subTest(pagina=nombre_url):
                 self.assertEqual(self.client.get(reverse(nombre_url)).status_code, 302)
+
+
+class RutTests(TestCase):
+
+    def test_normaliza_el_formato(self):
+        for escrito in ['12.345.678-5', '12345678-5', '123456785', ' 12.345.678-5 ']:
+            with self.subTest(rut=escrito):
+                self.assertEqual(normalizar_rut(escrito), '12345678-5')
+
+    def test_acepta_digito_k_y_cero(self):
+        self.assertEqual(normalizar_rut('10.000.013-k'), '10000013-K')
+        self.assertEqual(normalizar_rut('10.000.004-0'), '10000004-0')
+
+    def test_rechaza_digito_incorrecto_y_formatos_invalidos(self):
+        for invalido in ['12.345.678-9', 'abc', '123-4', '']:
+            with self.subTest(rut=invalido):
+                with self.assertRaises(ValidationError):
+                    normalizar_rut(invalido)
+
+
+class GestionAlumnosTests(TestCase):
+    """RF-04: registro con contraseña temporal, listado con búsqueda y edición de alumnos."""
+
+    DATOS = {'rut': '12.345.678-5', 'primer_nombre': 'Ana', 'segundo_nombre': 'María',
+             'apellido_paterno': 'Pérez', 'apellido_materno': 'Soto', 'email': 'Ana.Perez@Ejemplo.cl'}
+
+    def setUp(self):
+        self.admin = Usuario.objects.create_superuser('admin@ejemplo.cl', 'clave-segura-123', primer_nombre='Admin')
+        self.client.force_login(self.admin)
+
+    def crear_alumno(self, email, rut, nombre, apellido):
+        return Usuario.objects.create_user(email, 'clave-segura-123', rut=rut, primer_nombre=nombre,
+                                           apellido_paterno=apellido)
+
+    def test_registrar_crea_al_alumno_y_le_envia_una_contrasena_temporal(self):
+        respuesta = self.client.post(reverse('alumno_registrar'), self.DATOS)
+
+        self.assertRedirects(respuesta, reverse('gestion_alumnos'), fetch_redirect_response=False)
+        alumno = Usuario.objects.get(email='ana.perez@ejemplo.cl')
+        self.assertEqual((alumno.rol, alumno.rut, alumno.apellido_materno), (Rol.ALUMNO, '12345678-5', 'Soto'))
+        self.assertTrue(alumno.debe_cambiar_contrasena)
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ['ana.perez@ejemplo.cl'])
+        clave = re.search(r'Contraseña temporal: (\S+)', mail.outbox[0].body).group(1)
+        self.assertTrue(alumno.check_password(clave))
+
+    def test_registrar_con_rut_invalido_o_repetido_muestra_el_error_y_no_crea_nada(self):
+        self.crear_alumno('otro@ejemplo.cl', '12345678-5', 'Otro', 'Alumno')
+
+        for rut, error in [('12.345.678-9', 'dígito verificador'), ('12345678-5', 'Ya existe una cuenta con este RUT')]:
+            with self.subTest(rut=rut):
+                respuesta = self.client.post(reverse('alumno_registrar'), {**self.DATOS, 'rut': rut})
+                self.assertContains(respuesta, error)
+                self.assertContains(respuesta, '"modalRegistro"')
+        self.assertFalse(Usuario.objects.filter(email='ana.perez@ejemplo.cl').exists())
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_si_falla_el_correo_no_se_crea_la_cuenta(self):
+        with mock.patch('usuarios.cuentas.send_mail', side_effect=OSError('sin conexión')):
+            respuesta = self.client.post(reverse('alumno_registrar'), self.DATOS)
+
+        self.assertContains(respuesta, 'No se pudo enviar el correo')
+        self.assertFalse(Usuario.objects.filter(email='ana.perez@ejemplo.cl').exists())
+
+    def test_la_lista_muestra_solo_alumnos_y_la_busqueda_filtra(self):
+        self.crear_alumno('ana@ejemplo.cl', '11111111-1', 'Ana', 'Pérez')
+        self.crear_alumno('luis@ejemplo.cl', '22222222-2', 'Luis', 'Rojas')
+        Usuario.objects.create_user('profe@ejemplo.cl', 'clave-segura-123', rut='33333333-3', primer_nombre='Pedro',
+                                    apellido_paterno='Soto', rol=Rol.PROFESOR)
+
+        todos = self.client.get(reverse('gestion_alumnos'))
+        self.assertContains(todos, 'ana@ejemplo.cl')
+        self.assertContains(todos, 'luis@ejemplo.cl')
+        self.assertNotContains(todos, 'profe@ejemplo.cl')
+
+        for busqueda in ['ana pérez', 'ANA@', '11.111.111']:
+            with self.subTest(busqueda=busqueda):
+                respuesta = self.client.get(reverse('gestion_alumnos'), {'q': busqueda})
+                self.assertContains(respuesta, 'ana@ejemplo.cl')
+                self.assertNotContains(respuesta, 'luis@ejemplo.cl')
+
+    def test_editar_guarda_los_cambios_y_conserva_la_busqueda(self):
+        alumno = self.crear_alumno('ana@ejemplo.cl', '11111111-1', 'Ana', 'Pérez')
+
+        respuesta = self.client.post(reverse('alumno_editar', args=[alumno.pk]), {**self.DATOS, 'q': 'ana'})
+
+        self.assertRedirects(respuesta, f"{reverse('gestion_alumnos')}?q=ana", fetch_redirect_response=False)
+        alumno.refresh_from_db()
+        self.assertEqual((alumno.rut, alumno.segundo_nombre, alumno.email),
+                         ('12345678-5', 'María', 'ana.perez@ejemplo.cl'))
+        self.assertTrue(alumno.check_password('clave-segura-123'))
+
+    def test_editar_con_un_correo_ya_usado_no_guarda(self):
+        alumno = self.crear_alumno('ana@ejemplo.cl', '11111111-1', 'Ana', 'Pérez')
+        self.crear_alumno('luis@ejemplo.cl', '22222222-2', 'Luis', 'Rojas')
+
+        respuesta = self.client.post(reverse('alumno_editar', args=[alumno.pk]),
+                                     {**self.DATOS, 'email': 'LUIS@ejemplo.cl'})
+
+        self.assertContains(respuesta, 'Ya existe una cuenta con este correo')
+        self.assertContains(respuesta, '"modalEdicion"')
+        alumno.refresh_from_db()
+        self.assertEqual(alumno.email, 'ana@ejemplo.cl')
+
+    def test_los_formularios_piden_doble_verificacion(self):
+        self.crear_alumno('ana@ejemplo.cl', '11111111-1', 'Ana', 'Pérez')
+        respuesta = self.client.get(reverse('gestion_alumnos')).content.decode()
+
+        for formulario in ['formRegistro', 'formEdicion', 'formReenviar']:
+            with self.subTest(formulario=formulario):
+                self.assertRegex(respuesta, rf'id="{formulario}"[^>]*data-confirmar=')
+        self.assertIn('id="modalConfirmacion"', respuesta)
+
+    def test_desactivar_impide_ingresar_y_reactivar_lo_permite(self):
+        alumno = self.crear_alumno('ana@ejemplo.cl', '11111111-1', 'Ana', 'Pérez')
+        ingresar = {'email': 'ana@ejemplo.cl', 'password': 'clave-segura-123'}
+
+        self.client.post(reverse('alumno_estado', args=[alumno.pk]))
+        alumno.refresh_from_db()
+        self.assertFalse(alumno.is_active)
+        self.client.logout()
+        self.assertContains(self.client.post(reverse('login'), ingresar), MENSAJE_CREDENCIALES)
+        alumno.refresh_from_db()
+        self.assertEqual(alumno.intentos_fallidos, 0)
+
+        self.client.force_login(self.admin)
+        self.client.post(reverse('alumno_estado', args=[alumno.pk]))
+        self.client.logout()
+        self.assertEqual(self.client.post(reverse('login'), ingresar).status_code, 302)
+
+    def test_reenviar_cambia_la_contrasena_temporal(self):
+        alumno = self.crear_alumno('ana@ejemplo.cl', '11111111-1', 'Ana', 'Pérez')
+
+        self.client.post(reverse('alumno_reenviar_clave', args=[alumno.pk]))
+
+        alumno.refresh_from_db()
+        self.assertFalse(alumno.check_password('clave-segura-123'))
+        self.assertTrue(alumno.debe_cambiar_contrasena)
+        self.assertEqual(mail.outbox[0].to, ['ana@ejemplo.cl'])
+
+    def test_las_acciones_no_aplican_a_profesores_ni_las_usa_otro_rol(self):
+        profesor = Usuario.objects.create_user('profe@ejemplo.cl', 'clave-segura-123', rut='33333333-3',
+                                               primer_nombre='Pedro', apellido_paterno='Soto', rol=Rol.PROFESOR)
+        self.assertEqual(self.client.post(reverse('alumno_estado', args=[profesor.pk])).status_code, 404)
+
+        self.client.force_login(profesor)
+        self.assertEqual(self.client.post(reverse('alumno_registrar'), self.DATOS).status_code, 302)
+        self.assertFalse(Usuario.objects.filter(email='ana.perez@ejemplo.cl').exists())
+
+
+class ContrasenaTemporalTests(TestCase):
+    """RF-04: quien tiene una contraseña temporal debe cambiarla antes de usar la plataforma."""
+
+    def setUp(self):
+        self.alumno = Usuario.objects.create_user('ana@ejemplo.cl', 'clave-temporal-1', rut='11111111-1',
+                                                  primer_nombre='Ana', apellido_paterno='Pérez',
+                                                  debe_cambiar_contrasena=True)
+        self.client.force_login(self.alumno)
+
+    def test_lo_lleva_al_perfil_hasta_que_la_cambie(self):
+        self.assertRedirects(self.client.get(reverse('alumno_inicio')), reverse('perfil'))
+        self.assertContains(self.client.get(reverse('perfil')), 'contraseña temporal')
+
+        self.client.post(reverse('perfil'), {'old_password': 'clave-temporal-1', 'new_password1': 'Otra-Clave-Larga-456',
+                                             'new_password2': 'Otra-Clave-Larga-456'})
+
+        self.alumno.refresh_from_db()
+        self.assertFalse(self.alumno.debe_cambiar_contrasena)
+        self.assertEqual(self.client.get(reverse('alumno_inicio')).status_code, 200)
+
+    def test_puede_cerrar_sesion_sin_cambiarla(self):
+        self.assertRedirects(self.client.post(reverse('logout')), reverse('login'))
 
 
 class CambioContrasenaTests(TestCase):

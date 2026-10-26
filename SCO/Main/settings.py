@@ -53,6 +53,7 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'usuarios.middleware.SinCacheAutenticadoMiddleware',
+    'usuarios.middleware.CambioContrasenaObligatorioMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -139,3 +140,14 @@ AUTH_USER_MODEL = 'usuarios.Usuario'
 LOGIN_URL = 'login'            # a dónde manda @login_required si no hay sesión
 LOGIN_REDIRECT_URL = 'home'     # a dónde va tras iniciar sesión
 LOGOUT_REDIRECT_URL = 'login'   # a dónde va tras cerrar sesión
+
+# Correo (contraseñas temporales, RF-04 y RF-05)
+# En desarrollo los correos se muestran en la terminal; para enviarlos de verdad,
+# en el .env se define EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend y los datos SMTP.
+EMAIL_BACKEND = os.environ.get('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '587'))
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'True') == 'True'
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER or 'Adapt Academy <no-responder@adaptacademy.cl>')

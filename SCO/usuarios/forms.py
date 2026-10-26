@@ -7,6 +7,7 @@ from django.contrib.auth.forms import PasswordChangeForm
 from django.utils import timezone
 
 from .models import Usuario
+from .rut import normalizar_rut
 
 INTENTOS_MAXIMOS = 3
 MINUTOS_BLOQUEO = 5
@@ -30,6 +31,9 @@ class LoginForm(forms.Form):
             raise forms.ValidationError(MENSAJE_CREDENCIALES)
 
         cuenta = Usuario.objects.filter(email=email.strip().lower()).first()
+        if cuenta and not cuenta.is_active:
+            # Cuenta desactivada por el administrador: no se cuentan intentos
+            raise forms.ValidationError(MENSAJE_CREDENCIALES)
         if cuenta and cuenta.esta_bloqueado():
             raise forms.ValidationError(self._mensaje_bloqueo(cuenta))
 
@@ -63,7 +67,22 @@ class LoginForm(forms.Form):
                 f'Intente nuevamente en {minutos} {unidad}.')
 
 
-class CambioContrasenaForm(PasswordChangeForm):
+class EstiloBootstrapMixin:
+    """Pone la clase form-control a los campos y marca en rojo los que tienen errores."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for campo in self.fields.values():
+            campo.widget.attrs['class'] = 'form-control'
+
+    def full_clean(self):
+        super().full_clean()
+        for nombre in self.errors:
+            if nombre in self.fields:
+                self.fields[nombre].widget.attrs['class'] = 'form-control is-invalid'
+
+
+class CambioContrasenaForm(EstiloBootstrapMixin, PasswordChangeForm):
     """RF-08: pide la contraseña actual y la nueva dos veces; la nueva pasa por AUTH_PASSWORD_VALIDATORS."""
 
     error_messages = {
@@ -77,12 +96,40 @@ class CambioContrasenaForm(PasswordChangeForm):
         self.fields['old_password'].label = 'Contraseña actual'
         self.fields['new_password1'].label = 'Nueva contraseña'
         self.fields['new_password2'].label = 'Confirmar nueva contraseña'
-        for campo in self.fields.values():
-            campo.widget.attrs['class'] = 'form-control'
 
-    def full_clean(self):
-        super().full_clean()
-        # Marca en rojo (Bootstrap) los campos con errores
-        for nombre in self.errors:
-            if nombre in self.fields:
-                self.fields[nombre].widget.attrs['class'] = 'form-control is-invalid'
+    def save(self, commit=True):
+        # Con esto la contraseña temporal deja de ser obligatoria de cambiar
+        self.user.debe_cambiar_contrasena = False
+        return super().save(commit)
+
+
+class AlumnoForm(EstiloBootstrapMixin, forms.ModelForm):
+    """RF-04: datos con que el administrador registra o edita a un alumno."""
+
+    class Meta:
+        model = Usuario
+        fields = ['rut', 'primer_nombre', 'segundo_nombre', 'apellido_paterno', 'apellido_materno', 'email']
+        labels = {
+            'rut': 'RUT',
+            'primer_nombre': 'Nombre',
+            'segundo_nombre': 'Segundo nombre',
+            'apellido_paterno': 'Apellido paterno',
+            'apellido_materno': 'Apellido materno',
+            'email': 'Correo asociado',
+        }
+        error_messages = {
+            'rut': {'unique': 'Ya existe una cuenta con este RUT.'},
+            'email': {'unique': 'Ya existe una cuenta con este correo.'},
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['rut'].required = True
+        self.fields['apellido_paterno'].required = True
+        self.fields['rut'].widget.attrs['placeholder'] = '12.345.678-9'
+
+    def clean_rut(self):
+        return normalizar_rut(self.cleaned_data['rut'])
+
+    def clean_email(self):
+        return self.cleaned_data['email'].strip().lower()

@@ -43,6 +43,8 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
     # Bloqueo temporal por intentos fallidos de inicio de sesión (RF-01)
     intentos_fallidos = models.PositiveSmallIntegerField(default=0)
     bloqueado_hasta = models.DateTimeField(null=True, blank=True)
+    # Las cuentas creadas por el administrador reciben una contraseña temporal que se debe cambiar (RF-04)
+    debe_cambiar_contrasena = models.BooleanField(default=False)
 
     is_active = models.BooleanField('activo', default=True)
     # Solo controla el acceso al sitio /admin/ de Django; el rol dentro de la plataforma es `rol`

@@ -1,0 +1,14 @@
+{% autoescape off %}Hola {{ usuario.get_short_name }}:
+
+Tu cuenta en Adapt Academy está lista. Estos son tus datos de ingreso:
+
+Correo: {{ usuario.email }}
+Contraseña temporal: {{ clave }}
+
+Ingresa en {{ url_login }}
+Al entrar por primera vez, el sistema te pedirá cambiar esta contraseña por una propia.
+
+Si no esperabas este correo, puedes ignorarlo.
+
+Adapt Academy
+{% endautoescape %}

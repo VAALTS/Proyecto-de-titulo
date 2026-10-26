@@ -168,3 +168,56 @@ class LogoutTests(TestCase):
         respuesta = self.client.get(reverse('alumno_inicio'))
 
         self.assertIn('no-store', respuesta['Cache-Control'])
+
+
+class CambioContrasenaTests(TestCase):
+    """RF-08: cambio de contraseña desde el perfil."""
+
+    CLAVE = 'clave-segura-123'
+    NUEVA = 'Otra-Clave-Larga-456'
+
+    def setUp(self):
+        self.alumno = Usuario.objects.create_user('ana@ejemplo.cl', self.CLAVE, rut='11111111-1',
+                                                  primer_nombre='Ana', apellido_paterno='Pérez')
+        self.client.force_login(self.alumno)
+
+    def cambiar(self, actual, nueva, confirmacion=None):
+        return self.client.post(reverse('perfil'), {'old_password': actual, 'new_password1': nueva,
+                                                    'new_password2': confirmacion or nueva})
+
+    def test_el_menu_enlaza_al_perfil_con_el_formulario(self):
+        self.assertContains(self.client.get(reverse('alumno_inicio')), f'href="{reverse("perfil")}"')
+
+        respuesta = self.client.get(reverse('perfil'))
+        for etiqueta in ['Contraseña actual', 'Nueva contraseña', 'Confirmar nueva contraseña']:
+            self.assertContains(respuesta, etiqueta)
+
+    def test_el_perfil_exige_sesion(self):
+        self.client.logout()
+
+        self.assertEqual(self.client.get(reverse('perfil')).status_code, 302)
+
+    def test_cambio_correcto_guarda_la_clave_y_mantiene_la_sesion(self):
+        respuesta = self.cambiar(self.CLAVE, self.NUEVA)
+
+        self.assertRedirects(respuesta, reverse('perfil'), fetch_redirect_response=False)
+        self.alumno.refresh_from_db()
+        self.assertTrue(self.alumno.check_password(self.NUEVA))
+        self.assertIn('_auth_user_id', self.client.session)
+        self.assertContains(self.client.get(reverse('perfil')), 'se actualizó correctamente')
+
+    def test_rechaza_una_contrasena_actual_incorrecta(self):
+        self.assertContains(self.cambiar('equivocada', self.NUEVA), 'La contraseña actual no es correcta.')
+        self.alumno.refresh_from_db()
+        self.assertTrue(self.alumno.check_password(self.CLAVE))
+
+    def test_rechaza_una_confirmacion_distinta(self):
+        self.assertContains(self.cambiar(self.CLAVE, self.NUEVA, 'Otra-Distinta-789'),
+                            'Las contraseñas nuevas no coinciden.')
+
+    def test_la_nueva_debe_cumplir_las_politicas_de_seguridad(self):
+        for debil in ['corta1', '12345678901', 'password123']:
+            with self.subTest(clave=debil):
+                self.assertEqual(self.cambiar(self.CLAVE, debil).status_code, 200)
+                self.alumno.refresh_from_db()
+                self.assertTrue(self.alumno.check_password(self.CLAVE))

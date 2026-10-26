@@ -3,6 +3,7 @@ from datetime import timedelta
 
 from django import forms
 from django.contrib.auth import authenticate
+from django.contrib.auth.forms import PasswordChangeForm
 from django.utils import timezone
 
 from .models import Usuario
@@ -60,3 +61,28 @@ class LoginForm(forms.Form):
         unidad = 'minuto' if minutos == 1 else 'minutos'
         return (f'La cuenta está bloqueada temporalmente por {INTENTOS_MAXIMOS} intentos fallidos. '
                 f'Intente nuevamente en {minutos} {unidad}.')
+
+
+class CambioContrasenaForm(PasswordChangeForm):
+    """RF-08: pide la contraseña actual y la nueva dos veces; la nueva pasa por AUTH_PASSWORD_VALIDATORS."""
+
+    error_messages = {
+        **PasswordChangeForm.error_messages,
+        'password_incorrect': 'La contraseña actual no es correcta.',
+        'password_mismatch': 'Las contraseñas nuevas no coinciden.',
+    }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['old_password'].label = 'Contraseña actual'
+        self.fields['new_password1'].label = 'Nueva contraseña'
+        self.fields['new_password2'].label = 'Confirmar nueva contraseña'
+        for campo in self.fields.values():
+            campo.widget.attrs['class'] = 'form-control'
+
+    def full_clean(self):
+        super().full_clean()
+        # Marca en rojo (Bootstrap) los campos con errores
+        for nombre in self.errors:
+            if nombre in self.fields:
+                self.fields[nombre].widget.attrs['class'] = 'form-control is-invalid'

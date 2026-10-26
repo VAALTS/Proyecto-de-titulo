@@ -1,10 +1,11 @@
-from django.contrib.auth import login, logout
+from django.contrib import messages
+from django.contrib.auth import login, logout, update_session_auth_hash
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.shortcuts import redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
-from .forms import LoginForm
+from .forms import CambioContrasenaForm, LoginForm
 from .models import Rol
 
 INICIO_POR_ROL = {
@@ -50,6 +51,21 @@ def home_view(request):
 def logout_view(request):
     logout(request)
     return redirect('login')
+
+
+# ---------- Perfil (cualquier rol) ----------
+
+@login_required
+def perfil_view(request):
+    form = CambioContrasenaForm(request.user, request.POST or None)
+    if request.method == 'POST' and form.is_valid():
+        form.save()
+        # Sin esto, cambiar la contraseña cerraría la sesión actual
+        update_session_auth_hash(request, form.user)
+        messages.success(request, 'Tu contraseña se actualizó correctamente.')
+        return redirect('perfil')
+
+    return render(request, 'perfil/perfil.html', {'form': form})
 
 
 # ---------- Inicio de profesor y alumno (sus menús llegan en las fases 3 y 4) ----------

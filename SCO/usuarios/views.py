@@ -10,7 +10,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from .cuentas import asignar_clave_temporal
-from .forms import AlumnoForm, CambioContrasenaForm, LoginForm
+from .forms import CambioContrasenaForm, CuentaForm, LoginForm
 from .models import Rol, Usuario
 
 MENSAJE_ERROR_CORREO = ('No se pudo enviar el correo con la contraseña temporal, así que no se guardó ningún cambio. '
@@ -95,110 +95,123 @@ def admin_menu_view(request):
     return render(request, 'administrador/menu.html')
 
 
-# ---------- Gestión de alumnos (RF-04) ----------
+# ---------- Gestión de alumnos y profesores (RF-04 y RF-05) ----------
+# Las dos gestiones funcionan igual; cada vista recibe el rol desde urls.py.
 
-def buscar_alumnos(texto):
+GESTION_CUENTAS = {
+    Rol.ALUMNO: {
+        'titulo': 'Gestión de alumnos', 'singular': 'alumno', 'plural': 'alumnos',
+        'icono': 'bi-people-fill', 'color': 'primary',
+        'urls': {'lista': 'gestion_alumnos', 'registrar': 'alumno_registrar', 'editar': 'alumno_editar',
+                 'estado': 'alumno_estado', 'reenviar': 'alumno_reenviar_clave'},
+    },
+    Rol.PROFESOR: {
+        'titulo': 'Gestión de profesores', 'singular': 'profesor', 'plural': 'profesores',
+        'icono': 'bi-person-workspace', 'color': 'success',
+        'urls': {'lista': 'gestion_profesores', 'registrar': 'profesor_registrar', 'editar': 'profesor_editar',
+                 'estado': 'profesor_estado', 'reenviar': 'profesor_reenviar_clave'},
+    },
+}
+
+
+def buscar_cuentas(rol, texto):
     """Cada palabra buscada debe aparecer en el nombre, los apellidos, el correo o el RUT."""
-    alumnos = Usuario.objects.filter(rol=Rol.ALUMNO)
+    cuentas = Usuario.objects.filter(rol=rol)
     for palabra in texto.split():
-        alumnos = alumnos.filter(
+        cuentas = cuentas.filter(
             Q(primer_nombre__icontains=palabra) | Q(segundo_nombre__icontains=palabra)
             | Q(apellido_paterno__icontains=palabra) | Q(apellido_materno__icontains=palabra)
             | Q(email__icontains=palabra) | Q(rut__icontains=palabra.replace('.', ''))
         )
-    return alumnos.order_by('apellido_paterno', 'apellido_materno', 'primer_nombre')
+    return cuentas.order_by('apellido_paterno', 'apellido_materno', 'primer_nombre')
 
 
-def pagina_alumnos(request, form_registro=None, form_edicion=None, alumno_editado=None):
+def pagina_cuentas(request, rol, form_registro=None, form_edicion=None, cuenta_editada=None):
     # Si un formulario vuelve con errores, la página se abre con su modal desplegado
     busqueda = (request.POST.get('q') or request.GET.get('q', '')).strip()
-    return render(request, 'administrador/alumnos.html', {
-        'alumnos': buscar_alumnos(busqueda),
+    return render(request, 'administrador/cuentas.html', {
+        'gestion': GESTION_CUENTAS[rol],
+        'cuentas': buscar_cuentas(rol, busqueda),
         'q': busqueda,
-        'form_registro': form_registro or AlumnoForm(auto_id='registro_%s'),
-        'form_edicion': form_edicion or AlumnoForm(auto_id='edicion_%s'),
-        'alumno_editado': alumno_editado,
+        'form_registro': form_registro or CuentaForm(auto_id='registro_%s'),
+        'form_edicion': form_edicion or CuentaForm(auto_id='edicion_%s'),
+        'cuenta_editada': cuenta_editada,
         'abrir_modal': 'modalRegistro' if form_registro else 'modalEdicion' if form_edicion else '',
     })
 
 
-def volver_a_alumnos(request):
+def volver_a_la_lista(request, rol):
     # Conserva la búsqueda que el administrador tenía en pantalla
-    url = reverse('gestion_alumnos')
+    url = reverse(GESTION_CUENTAS[rol]['urls']['lista'])
     busqueda = request.POST.get('q', '').strip()
     return redirect(f'{url}?{urlencode({"q": busqueda})}' if busqueda else url)
 
 
 @admin_required
-def gestion_alumnos_view(request):
-    return pagina_alumnos(request)
+def gestion_cuentas_view(request, rol):
+    return pagina_cuentas(request, rol)
 
 
 @admin_required
 @require_POST
-def alumno_registrar_view(request):
-    form = AlumnoForm(request.POST, auto_id='registro_%s')
+def cuenta_registrar_view(request, rol):
+    form = CuentaForm(request.POST, auto_id='registro_%s')
     if not form.is_valid():
-        return pagina_alumnos(request, form_registro=form)
+        return pagina_cuentas(request, rol, form_registro=form)
 
-    alumno = form.save(commit=False)
-    alumno.rol = Rol.ALUMNO
+    cuenta = form.save(commit=False)
+    cuenta.rol = rol
     try:
-        asignar_clave_temporal(alumno, request)
+        asignar_clave_temporal(cuenta, request)
     except OSError:
         form.add_error(None, MENSAJE_ERROR_CORREO)
-        return pagina_alumnos(request, form_registro=form)
+        return pagina_cuentas(request, rol, form_registro=form)
 
-    messages.success(request, f'Se registró a {alumno.get_short_name()} y se envió su contraseña temporal '
-                              f'a {alumno.email}.')
-    return volver_a_alumnos(request)
+    messages.success(request, f'Se registró a {cuenta.get_short_name()} y se envió su contraseña temporal '
+                              f'a {cuenta.email}.')
+    return volver_a_la_lista(request, rol)
 
 
 @admin_required
 @require_POST
-def alumno_editar_view(request, pk):
-    alumno = get_object_or_404(Usuario, pk=pk, rol=Rol.ALUMNO)
-    form = AlumnoForm(request.POST, instance=alumno, auto_id='edicion_%s')
+def cuenta_editar_view(request, rol, pk):
+    cuenta = get_object_or_404(Usuario, pk=pk, rol=rol)
+    form = CuentaForm(request.POST, instance=cuenta, auto_id='edicion_%s')
     if not form.is_valid():
-        # El formulario ya copió los datos inválidos a `alumno`; se muestra el registro guardado
-        return pagina_alumnos(request, form_edicion=form, alumno_editado=Usuario.objects.get(pk=pk))
+        # El formulario ya copió los datos inválidos a `cuenta`; se muestra el registro guardado
+        return pagina_cuentas(request, rol, form_edicion=form, cuenta_editada=Usuario.objects.get(pk=pk))
 
     form.save()
-    messages.success(request, f'Se guardaron los cambios de {alumno.get_short_name()}.')
-    return volver_a_alumnos(request)
+    messages.success(request, f'Se guardaron los cambios de {cuenta.get_short_name()}.')
+    return volver_a_la_lista(request, rol)
 
 
 @admin_required
 @require_POST
-def alumno_estado_view(request, pk):
-    # Desactivar en vez de borrar: el alumno ya no puede ingresar, pero su historial se conserva
-    alumno = get_object_or_404(Usuario, pk=pk, rol=Rol.ALUMNO)
-    alumno.is_active = not alumno.is_active
-    alumno.save(update_fields=['is_active'])
-    estado = 'reactivó' if alumno.is_active else 'desactivó'
-    messages.success(request, f'Se {estado} la cuenta de {alumno.get_short_name()}.')
-    return volver_a_alumnos(request)
+def cuenta_estado_view(request, rol, pk):
+    # Desactivar en vez de borrar: la persona ya no puede ingresar, pero su historial se conserva
+    cuenta = get_object_or_404(Usuario, pk=pk, rol=rol)
+    cuenta.is_active = not cuenta.is_active
+    cuenta.save(update_fields=['is_active'])
+    estado = 'reactivó' if cuenta.is_active else 'desactivó'
+    messages.success(request, f'Se {estado} la cuenta de {cuenta.get_short_name()}.')
+    return volver_a_la_lista(request, rol)
 
 
 @admin_required
 @require_POST
-def alumno_reenviar_clave_view(request, pk):
-    alumno = get_object_or_404(Usuario, pk=pk, rol=Rol.ALUMNO, is_active=True)
+def cuenta_reenviar_clave_view(request, rol, pk):
+    cuenta = get_object_or_404(Usuario, pk=pk, rol=rol, is_active=True)
     try:
-        asignar_clave_temporal(alumno, request)
+        asignar_clave_temporal(cuenta, request)
     except OSError:
         messages.error(request, MENSAJE_ERROR_CORREO)
     else:
-        messages.success(request, f'Se envió una nueva contraseña temporal a {alumno.email}.')
-    return volver_a_alumnos(request)
+        messages.success(request, f'Se envió una nueva contraseña temporal a {cuenta.email}.')
+    return volver_a_la_lista(request, rol)
 
 
-# ---------- Gestión de profesores y cursos (RF-05 y RF-06) ----------
-
-@admin_required
-def gestion_profesores_view(request):
-    return render(request, 'administrador/profesores.html')
-
+# ---------- Gestión de cursos (RF-06) ----------
 
 @admin_required
 def gestion_cursos_view(request):

@@ -103,8 +103,8 @@ class CambioContrasenaForm(EstiloBootstrapMixin, PasswordChangeForm):
         return super().save(commit)
 
 
-class AlumnoForm(EstiloBootstrapMixin, forms.ModelForm):
-    """RF-04: datos con que el administrador registra o edita a un alumno."""
+class CuentaForm(EstiloBootstrapMixin, forms.ModelForm):
+    """RF-04 y RF-05: datos con que el administrador registra o edita a un alumno o a un profesor."""
 
     class Meta:
         model = Usuario

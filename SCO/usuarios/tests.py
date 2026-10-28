@@ -359,6 +359,61 @@ class GestionAlumnosTests(TestCase):
         self.assertFalse(Usuario.objects.filter(email='ana.perez@ejemplo.cl').exists())
 
 
+class GestionProfesoresTests(TestCase):
+    """RF-05: la gestión de profesores reutiliza la de alumnos, pero solo trabaja con profesores."""
+
+    DATOS = {'rut': '12.345.678-5', 'primer_nombre': 'Pedro', 'segundo_nombre': '',
+             'apellido_paterno': 'Soto', 'apellido_materno': 'Mella', 'email': 'pedro.soto@ejemplo.cl'}
+
+    def setUp(self):
+        self.admin = Usuario.objects.create_superuser('admin@ejemplo.cl', 'clave-segura-123', primer_nombre='Admin')
+        self.client.force_login(self.admin)
+
+    def crear(self, email, rut, nombre, rol):
+        return Usuario.objects.create_user(email, 'clave-segura-123', rut=rut, primer_nombre=nombre,
+                                           apellido_paterno='Pérez', rol=rol)
+
+    def test_registrar_crea_un_profesor_con_contrasena_temporal(self):
+        respuesta = self.client.post(reverse('profesor_registrar'), self.DATOS)
+
+        self.assertRedirects(respuesta, reverse('gestion_profesores'), fetch_redirect_response=False)
+        profesor = Usuario.objects.get(email='pedro.soto@ejemplo.cl')
+        self.assertEqual(profesor.rol, Rol.PROFESOR)
+        self.assertTrue(profesor.debe_cambiar_contrasena)
+        self.assertEqual(mail.outbox[0].to, ['pedro.soto@ejemplo.cl'])
+
+    def test_la_lista_muestra_solo_profesores_y_se_busca_por_nombre(self):
+        self.crear('pedro@ejemplo.cl', '11111111-1', 'Pedro', Rol.PROFESOR)
+        self.crear('marta@ejemplo.cl', '22222222-2', 'Marta', Rol.PROFESOR)
+        self.crear('ana@ejemplo.cl', '33333333-3', 'Ana', Rol.ALUMNO)
+
+        todos = self.client.get(reverse('gestion_profesores'))
+        self.assertContains(todos, 'Registrar profesor')
+        self.assertContains(todos, 'pedro@ejemplo.cl')
+        self.assertNotContains(todos, 'ana@ejemplo.cl')
+
+        busqueda = self.client.get(reverse('gestion_profesores'), {'q': 'marta'})
+        self.assertContains(busqueda, 'marta@ejemplo.cl')
+        self.assertNotContains(busqueda, 'pedro@ejemplo.cl')
+
+    def test_editar_un_profesor_guarda_los_cambios(self):
+        profesor = self.crear('pedro@ejemplo.cl', '11111111-1', 'Pedro', Rol.PROFESOR)
+
+        self.client.post(reverse('profesor_editar', args=[profesor.pk]), self.DATOS)
+
+        profesor.refresh_from_db()
+        self.assertEqual((profesor.email, profesor.apellido_materno, profesor.rol),
+                         ('pedro.soto@ejemplo.cl', 'Mella', Rol.PROFESOR))
+
+    def test_cada_gestion_solo_modifica_su_propio_rol(self):
+        alumno = self.crear('ana@ejemplo.cl', '33333333-3', 'Ana', Rol.ALUMNO)
+        profesor = self.crear('pedro@ejemplo.cl', '11111111-1', 'Pedro', Rol.PROFESOR)
+
+        self.assertEqual(self.client.post(reverse('profesor_editar', args=[alumno.pk]), self.DATOS).status_code, 404)
+        self.assertEqual(self.client.post(reverse('profesor_estado', args=[alumno.pk])).status_code, 404)
+        self.assertEqual(self.client.post(reverse('alumno_reenviar_clave', args=[profesor.pk])).status_code, 404)
+
+
 class ContrasenaTemporalTests(TestCase):
     """RF-04: quien tiene una contraseña temporal debe cambiarla antes de usar la plataforma."""
 

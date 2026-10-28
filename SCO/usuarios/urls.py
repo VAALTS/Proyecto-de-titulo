@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from .models import Rol
 
 urlpatterns = [
     # Inicio de sesión
@@ -14,11 +15,18 @@ urlpatterns = [
 
     # Panel del administrador
     path('panel/', views.admin_menu_view, name='admin_menu'),
-    path('panel/alumnos/', views.gestion_alumnos_view, name='gestion_alumnos'),
-    path('panel/alumnos/registrar/', views.alumno_registrar_view, name='alumno_registrar'),
-    path('panel/alumnos/<int:pk>/editar/', views.alumno_editar_view, name='alumno_editar'),
-    path('panel/alumnos/<int:pk>/estado/', views.alumno_estado_view, name='alumno_estado'),
-    path('panel/alumnos/<int:pk>/reenviar-clave/', views.alumno_reenviar_clave_view, name='alumno_reenviar_clave'),
-    path('panel/profesores/', views.gestion_profesores_view, name='gestion_profesores'),
     path('panel/cursos/', views.gestion_cursos_view, name='gestion_cursos'),
 ]
+
+# Gestión de alumnos y profesores: mismas vistas, cambia el rol (RF-04 y RF-05)
+for plural, singular, rol in [('alumnos', 'alumno', Rol.ALUMNO), ('profesores', 'profesor', Rol.PROFESOR)]:
+    urlpatterns += [
+        path(f'panel/{plural}/', views.gestion_cuentas_view, {'rol': rol}, name=f'gestion_{plural}'),
+        path(f'panel/{plural}/registrar/', views.cuenta_registrar_view, {'rol': rol}, name=f'{singular}_registrar'),
+        path(f'panel/{plural}/<int:pk>/editar/', views.cuenta_editar_view, {'rol': rol},
+             name=f'{singular}_editar'),
+        path(f'panel/{plural}/<int:pk>/estado/', views.cuenta_estado_view, {'rol': rol},
+             name=f'{singular}_estado'),
+        path(f'panel/{plural}/<int:pk>/reenviar-clave/', views.cuenta_reenviar_clave_view, {'rol': rol},
+             name=f'{singular}_reenviar_clave'),
+    ]

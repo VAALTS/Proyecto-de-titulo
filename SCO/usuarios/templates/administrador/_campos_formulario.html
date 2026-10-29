@@ -4,7 +4,7 @@
 {% endfor %}
 <div class="row g-3">
     {% for campo in form %}
-        <div class="col-12 col-md-6">
+        <div class="col-12{% if campo.widget_type != 'textarea' %} col-md-6{% endif %}">
             <label for="{{ campo.id_for_label }}" class="form-label">
                 {{ campo.label }}{% if campo.field.required %} <span class="text-danger">*</span>{% endif %}
             </label>

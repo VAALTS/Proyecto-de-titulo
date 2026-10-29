@@ -15,7 +15,6 @@ urlpatterns = [
 
     # Panel del administrador
     path('panel/', views.admin_menu_view, name='admin_menu'),
-    path('panel/cursos/', views.gestion_cursos_view, name='gestion_cursos'),
 ]
 
 # Gestión de alumnos y profesores: mismas vistas, cambia el rol (RF-04 y RF-05)

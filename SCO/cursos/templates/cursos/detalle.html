@@ -1,0 +1,186 @@
+{% extends 'administrador/base_admin.html' %}
+
+{% block title %}{{ curso.nombre }}{% endblock %}
+
+{% block extra_css %}
+{{ block.super }}
+<link href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.bootstrap5.min.css" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-4">
+    <h2 class="fw-bold mb-0"><i class="bi bi-journal-bookmark-fill text-warning me-2"></i>{{ curso.nombre }}</h2>
+    <div class="d-flex flex-wrap gap-2">
+        <a href="{% url 'gestion_cursos' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left me-1"></i>Volver a cursos
+        </a>
+        {% if curso.activo %}
+            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#modalEdicion">
+                <i class="bi bi-pencil-square me-1"></i>Editar
+            </button>
+            <form method="post" action="{% url 'curso_eliminar' curso.pk %}" class="m-0"
+                  data-confirmar="¿Está seguro de eliminar el curso «{{ curso.nombre }}»? Dejará de estar disponible, pero se conservarán sus alumnos, calificaciones y asistencias.">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-outline-danger"><i class="bi bi-trash me-1"></i>Eliminar</button>
+            </form>
+        {% endif %}
+    </div>
+</div>
+
+{% if not curso.activo %}
+    <div class="alert alert-secondary d-flex flex-wrap gap-2 justify-content-between align-items-center">
+        <span><i class="bi bi-archive me-1"></i>Este curso fue eliminado el {{ curso.eliminado_en|date:"d/m/Y \a \l\a\s H:i" }}. Su historial se conserva.</span>
+        <form method="post" action="{% url 'curso_restaurar' curso.pk %}" class="m-0"
+              data-confirmar="¿Está seguro de restaurar el curso «{{ curso.nombre }}»? Volverá a estar disponible.">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-arrow-counterclockwise me-1"></i>Restaurar curso</button>
+        </form>
+    </div>
+{% endif %}
+
+<div class="row g-4">
+    <div class="col-12 col-lg-5">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-body">
+                <h5 class="card-title mb-3">Información del curso</h5>
+                <dl class="mb-0">
+                    <dt>Profesor a cargo</dt>
+                    <dd>
+                        {{ curso.profesor.get_full_name }}
+                        <div class="small text-muted text-break">{{ curso.profesor.email }}</div>
+                        {% if not curso.profesor.is_active %}
+                            <span class="badge text-bg-warning">Cuenta del profesor desactivada</span>
+                        {% endif %}
+                    </dd>
+                    <dt>Descripción</dt>
+                    <dd class="mb-0">{{ curso.descripcion|linebreaksbr|default:'<span class="text-muted">Sin descripción.</span>' }}</dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12 col-lg-7">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-body">
+                <h5 class="card-title mb-3">
+                    Alumnos inscritos <span class="badge text-bg-primary">{{ inscripciones|length }}</span>
+                </h5>
+
+                {% if curso.activo %}
+                    {# RF-07: buscador de alumnos para inscribir #}
+                    <form method="post" action="{% url 'curso_inscribir' curso.pk %}" id="formInscripcion" class="mb-3" novalidate
+                          data-confirmar="¿Está seguro de inscribir a los alumnos seleccionados en «{{ curso.nombre }}»?">
+                        {% csrf_token %}
+                        <label for="{{ form_inscripcion.alumnos.id_for_label }}" class="form-label">Inscribir alumnos</label>
+                        <div class="d-flex gap-2 align-items-start">
+                            <div class="flex-grow-1">
+                                <select name="alumnos" id="{{ form_inscripcion.alumnos.id_for_label }}" multiple
+                                        class="{% if form_inscripcion.alumnos.errors %}is-invalid{% endif %}"
+                                        placeholder="Buscar por nombre, RUT o correo"
+                                        {% if not form_inscripcion.alumnos.field.queryset.exists %}disabled{% endif %}>
+                                    {% for valor, etiqueta in form_inscripcion.alumnos.field.choices %}
+                                        <option value="{{ valor }}" {% if valor|stringformat:'s' in form_inscripcion.alumnos.value %}selected{% endif %}>{{ etiqueta }}</option>
+                                    {% endfor %}
+                                </select>
+                                {% for error in form_inscripcion.alumnos.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                            <button type="submit" class="btn btn-primary text-nowrap"
+                                    {% if not form_inscripcion.alumnos.field.queryset.exists %}disabled{% endif %}>
+                                <i class="bi bi-person-plus me-1"></i>Inscribir
+                            </button>
+                        </div>
+                        {% if not form_inscripcion.alumnos.field.queryset.exists %}
+                            <div class="form-text">No hay alumnos activos disponibles para inscribir.</div>
+                        {% endif %}
+                    </form>
+                {% endif %}
+
+                {% if inscripciones %}
+                    <ul class="list-group list-group-flush">
+                        {% for inscripcion in inscripciones %}
+                            <li class="list-group-item px-0 d-flex flex-wrap gap-2 justify-content-between align-items-center">
+                                <div>
+                                    {{ inscripcion.alumno.get_full_name }}
+                                    {% if not inscripcion.alumno.is_active %}
+                                        <span class="badge text-bg-warning">Cuenta desactivada</span>
+                                    {% endif %}
+                                    <div class="small text-muted">
+                                        {{ inscripcion.alumno.rut }} · inscrito el {{ inscripcion.fecha_inscripcion|date:"d/m/Y" }}
+                                    </div>
+                                </div>
+                                {% if curso.activo %}
+                                    <form method="post" action="{% url 'curso_retirar' curso.pk inscripcion.pk %}" class="m-0"
+                                          data-confirmar="¿Está seguro de retirar a {{ inscripcion.alumno.get_short_name }} de «{{ curso.nombre }}»? Su historial en el curso se conservará.">
+                                        {% csrf_token %}
+                                        <button type="submit" class="btn btn-outline-danger btn-sm">
+                                            <i class="bi bi-person-dash me-1"></i>Retirar
+                                        </button>
+                                    </form>
+                                {% endif %}
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="text-muted mb-0">Aún no hay alumnos inscritos en este curso.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if curso.activo %}
+    <div class="modal fade" id="modalEdicion" tabindex="-1" aria-labelledby="tituloEdicion" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="tituloEdicion"><i class="bi bi-pencil-square me-2"></i>Editar curso</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <form method="post" action="{% url 'curso_editar' curso.pk %}" id="formEdicion" novalidate
+                          data-confirmar="¿Está seguro de guardar los cambios de este curso?">
+                        {% csrf_token %}
+                        {% include 'administrador/_campos_formulario.html' with form=form_edicion %}
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" form="formEdicion" class="btn btn-primary">Guardar cambios</button>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{{ abrir_modal|json_script:"abrir-modal" }}
+<script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
+<script>
+    // RF-07: menú desplegable con buscador para elegir alumnos sin errores de tipeo
+    const selectorAlumnos = document.getElementById('{{ form_inscripcion.alumnos.id_for_label }}');
+    if (selectorAlumnos && !selectorAlumnos.disabled) {
+        // Ignora tildes, mayúsculas y los puntos del RUT; cada palabra buscada debe aparecer
+        const normalizar = (texto) => texto.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\./g, '');
+        new TomSelect(selectorAlumnos, {
+            plugins: ['remove_button'],
+            maxOptions: null,
+            hideSelected: true,
+            score: (busqueda) => {
+                const palabras = normalizar(busqueda).split(/\s+/).filter(Boolean);
+                return (opcion) => palabras.every((palabra) => normalizar(opcion.text).includes(palabra)) ? 1 : 0;
+            },
+            render: {
+                no_results: () => '<div class="no-results">No se encontraron alumnos</div>',
+            },
+        });
+    }
+</script>
+<script>
+    // Si el servidor devolvió el formulario con errores, se vuelve a abrir su modal
+    const abrir = JSON.parse(document.getElementById('abrir-modal').textContent);
+    if (abrir) bootstrap.Modal.getOrCreateInstance(document.getElementById(abrir)).show();
+</script>
+{% endblock %}

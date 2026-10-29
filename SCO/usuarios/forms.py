@@ -68,18 +68,23 @@ class LoginForm(forms.Form):
 
 
 class EstiloBootstrapMixin:
-    """Pone la clase form-control a los campos y marca en rojo los que tienen errores."""
+    """Pone la clase de Bootstrap a los campos y marca en rojo los que tienen errores."""
+
+    @staticmethod
+    def clase_bootstrap(campo):
+        return 'form-select' if isinstance(campo.widget, forms.Select) else 'form-control'
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         for campo in self.fields.values():
-            campo.widget.attrs['class'] = 'form-control'
+            campo.widget.attrs['class'] = self.clase_bootstrap(campo)
 
     def full_clean(self):
         super().full_clean()
         for nombre in self.errors:
             if nombre in self.fields:
-                self.fields[nombre].widget.attrs['class'] = 'form-control is-invalid'
+                campo = self.fields[nombre]
+                campo.widget.attrs['class'] = f'{self.clase_bootstrap(campo)} is-invalid'
 
 
 class CambioContrasenaForm(EstiloBootstrapMixin, PasswordChangeForm):

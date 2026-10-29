@@ -57,6 +57,7 @@
                 <tbody>
                     {% for cuenta in cuentas %}
                         <tr class="fila-cuenta{% if not cuenta.is_active %} text-muted{% endif %}" tabindex="0"
+                            data-pk="{{ cuenta.pk }}"
                             data-nombre="{{ cuenta.get_short_name }}" data-activo="{{ cuenta.is_active|yesno:'1,0' }}"
                             data-url-editar="{% url gestion.urls.editar cuenta.pk %}"
                             data-url-estado="{% url gestion.urls.estado cuenta.pk %}"
@@ -73,6 +74,18 @@
                                     <span class="badge text-bg-success">Activo</span>
                                 {% else %}
                                     <span class="badge text-bg-secondary">Inactivo</span>
+                                {% endif %}
+                                {% if gestion.cursos %}
+                                    {# Se copia al modal de edición al seleccionar la fila #}
+                                    <template class="cursos-cuenta">
+                                        {% for curso in cuenta.cursos_activos %}
+                                            <a href="{% url 'curso_detalle' curso.pk %}" class="list-group-item list-group-item-action">
+                                                <i class="bi bi-journal-bookmark me-2"></i>{{ curso.nombre }}
+                                            </a>
+                                        {% empty %}
+                                            <p class="text-muted small mb-0">{{ gestion.cursos.vacio }}</p>
+                                        {% endfor %}
+                                    </template>
                                 {% endif %}
                             </td>
                         </tr>
@@ -135,6 +148,16 @@
                     {% include 'administrador/_campos_formulario.html' with form=form_edicion %}
                 </form>
 
+                {% if gestion.cursos %}
+                    <hr>
+                    <h6 class="fw-semibold">{{ gestion.cursos.titulo }}</h6>
+                    <div class="list-group mb-2" id="cursosEdicion"></div>
+                    <p class="small text-muted mb-0">
+                        {{ gestion.cursos.nota }}
+                        <a href="{% url 'gestion_cursos' %}">Gestión de cursos</a>.
+                    </p>
+                {% endif %}
+
                 <hr>
                 <h6 class="fw-semibold">Cuenta</h6>
                 <div class="d-flex flex-wrap gap-2">
@@ -188,8 +211,15 @@
                 : `¿Está seguro de reactivar esta cuenta? El ${singular} podrá volver a ingresar.`;
         }
 
+        function mostrarCursos(fila) {
+            const cursos = document.getElementById('cursosEdicion');
+            const plantilla = fila && fila.querySelector('template.cursos-cuenta');
+            if (cursos) cursos.innerHTML = plantilla ? plantilla.innerHTML : '';
+        }
+
         function abrirEdicion(fila) {
             document.getElementById('nombreEdicion').textContent = fila.dataset.nombre;
+            mostrarCursos(fila);
             formEdicion.action = fila.dataset.urlEditar;
             formReenviar.action = fila.dataset.urlReenviar;
             formEstado.action = fila.dataset.urlEstado;
@@ -210,7 +240,10 @@
             });
         });
 
-        {% if cuenta_editada %}mostrarEstado({{ cuenta_editada.is_active|yesno:'true,false' }});{% endif %}
+        {% if cuenta_editada %}
+            mostrarEstado({{ cuenta_editada.is_active|yesno:'true,false' }});
+            mostrarCursos(document.querySelector('.fila-cuenta[data-pk="{{ cuenta_editada.pk }}"]'));
+        {% endif %}
 
         // Si el servidor devolvió un formulario con errores, se vuelve a abrir su modal
         const abrir = JSON.parse(document.getElementById('abrir-modal').textContent);

@@ -3,11 +3,13 @@ from urllib.parse import urlencode
 from django.contrib import messages
 from django.contrib.auth import login, logout, update_session_auth_hash
 from django.contrib.auth.decorators import login_required, user_passes_test
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
+
+from cursos.models import Curso, Inscripcion
 
 from .cuentas import asignar_clave_temporal
 from .forms import CambioContrasenaForm, CuentaForm, LoginForm
@@ -102,12 +104,18 @@ GESTION_CUENTAS = {
     Rol.ALUMNO: {
         'titulo': 'Gestión de alumnos', 'singular': 'alumno', 'plural': 'alumnos',
         'icono': 'bi-people-fill', 'color': 'primary',
+        # RF-04: los cursos se muestran en su perfil; la inscripción se hace en la página del curso (RF-07)
+        'cursos': {'titulo': 'Capacitación inscrita', 'vacio': 'No está inscrito en ningún curso.',
+                   'nota': 'Para inscribirlo o retirarlo, abra el curso en'},
         'urls': {'lista': 'gestion_alumnos', 'registrar': 'alumno_registrar', 'editar': 'alumno_editar',
                  'estado': 'alumno_estado', 'reenviar': 'alumno_reenviar_clave'},
     },
     Rol.PROFESOR: {
         'titulo': 'Gestión de profesores', 'singular': 'profesor', 'plural': 'profesores',
         'icono': 'bi-person-workspace', 'color': 'success',
+        # RF-05: los cursos se muestran en su perfil; se asignan al editar el curso (RF-06)
+        'cursos': {'titulo': 'Asignaturas que imparte', 'vacio': 'No tiene cursos a cargo.',
+                   'nota': 'Para asignar o cambiar cursos, edite el curso en'},
         'urls': {'lista': 'gestion_profesores', 'registrar': 'profesor_registrar', 'editar': 'profesor_editar',
                  'estado': 'profesor_estado', 'reenviar': 'profesor_reenviar_clave'},
     },
@@ -129,9 +137,19 @@ def buscar_cuentas(rol, texto):
 def pagina_cuentas(request, rol, form_registro=None, form_edicion=None, cuenta_editada=None):
     # Si un formulario vuelve con errores, la página se abre con su modal desplegado
     busqueda = (request.POST.get('q') or request.GET.get('q', '')).strip()
+    cuentas = buscar_cuentas(rol, busqueda)
+    if rol == Rol.PROFESOR:
+        cuentas = cuentas.prefetch_related(
+            Prefetch('cursos_a_cargo', queryset=Curso.objects.activos(), to_attr='cursos_activos'))
+    else:
+        inscripciones = Inscripcion.objects.filter(activa=True, curso__activo=True).select_related('curso')
+        cuentas = list(cuentas.prefetch_related(
+            Prefetch('inscripciones', queryset=inscripciones.order_by('curso__nombre'), to_attr='vigentes')))
+        for cuenta in cuentas:
+            cuenta.cursos_activos = [inscripcion.curso for inscripcion in cuenta.vigentes]
     return render(request, 'administrador/cuentas.html', {
         'gestion': GESTION_CUENTAS[rol],
-        'cuentas': buscar_cuentas(rol, busqueda),
+        'cuentas': cuentas,
         'q': busqueda,
         'form_registro': form_registro or CuentaForm(auto_id='registro_%s'),
         'form_edicion': form_edicion or CuentaForm(auto_id='edicion_%s'),
@@ -209,10 +227,3 @@ def cuenta_reenviar_clave_view(request, rol, pk):
     else:
         messages.success(request, f'Se envió una nueva contraseña temporal a {cuenta.email}.')
     return volver_a_la_lista(request, rol)
-
-
-# ---------- Gestión de cursos (RF-06) ----------
-
-@admin_required
-def gestion_cursos_view(request):
-    return render(request, 'administrador/cursos.html')

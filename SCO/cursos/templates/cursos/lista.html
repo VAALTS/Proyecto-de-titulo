@@ -1,0 +1,136 @@
+{% extends 'administrador/base_admin.html' %}
+
+{% block title %}Gestión de cursos{% endblock %}
+
+{% block extra_css %}
+{{ block.super }}
+<style>
+    .lista-cursos { max-height: 60vh; overflow-y: auto; }
+    .lista-cursos thead th { position: sticky; top: 0; z-index: 1; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-4">
+    <h2 class="fw-bold mb-0"><i class="bi bi-journal-bookmark-fill text-warning me-2"></i>Gestión de cursos</h2>
+    <div class="d-flex gap-2">
+        <a href="{% url 'admin_menu' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left me-1"></i>Volver al menú
+        </a>
+        <button type="button" class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#modalCreacion">
+            <i class="bi bi-plus-circle-fill me-1"></i>Crear curso
+        </button>
+    </div>
+</div>
+
+<div class="card shadow-sm border-0">
+    <div class="card-body">
+        <form method="get" class="row g-2 align-items-center mb-3" role="search">
+            <div class="col-12 col-md">
+                <div class="d-flex gap-2">
+                    <input type="search" name="q" value="{{ q }}" class="form-control"
+                           placeholder="Buscar por nombre del curso o del profesor" aria-label="Buscar curso">
+                    <button type="submit" class="btn btn-outline-primary"><i class="bi bi-search"></i></button>
+                    {% if q %}
+                        <a href="{% url 'gestion_cursos' %}{% if con_eliminados %}?eliminados=1{% endif %}"
+                           class="btn btn-outline-secondary" title="Limpiar búsqueda"><i class="bi bi-x-lg"></i></a>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="col-12 col-md-auto">
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" role="switch" id="mostrarEliminados"
+                           name="eliminados" value="1" {% if con_eliminados %}checked{% endif %} onchange="this.form.submit()">
+                    <label class="form-check-label" for="mostrarEliminados">Mostrar eliminados</label>
+                </div>
+            </div>
+        </form>
+
+        <p class="text-muted small mb-2">
+            {{ cursos|length }} curso{{ cursos|length|pluralize }}{% if q %} encontrado{{ cursos|length|pluralize }} para «{{ q }}»{% endif %}.
+            Haz clic en un curso para consultar y editar su información.
+        </p>
+
+        <div class="lista-cursos border rounded">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Curso</th>
+                        <th class="d-none d-md-table-cell">Profesor a cargo</th>
+                        <th class="text-center">Alumnos</th>
+                        <th>Estado</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for curso in cursos %}
+                        <tr class="position-relative{% if not curso.activo %} text-muted{% endif %}">
+                            <td>
+                                <a href="{% url 'curso_detalle' curso.pk %}" class="stretched-link text-reset text-decoration-none fw-semibold">{{ curso.nombre }}</a>
+                                <div class="small text-muted d-md-none">{{ curso.profesor.get_short_name }}</div>
+                            </td>
+                            <td class="d-none d-md-table-cell">{{ curso.profesor.get_full_name }}</td>
+                            <td class="text-center">{{ curso.inscritos }}</td>
+                            <td>
+                                {% if curso.activo %}
+                                    <span class="badge text-bg-success">Activo</span>
+                                {% else %}
+                                    <span class="badge text-bg-secondary">Eliminado</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="4" class="text-center text-muted py-4">
+                                {% if q %}No hay cursos que coincidan con la búsqueda.{% elif con_eliminados %}Aún no hay cursos creados.{% else %}No hay cursos activos.{% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{# Creación #}
+<div class="modal fade" id="modalCreacion" tabindex="-1" aria-labelledby="tituloCreacion" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="tituloCreacion"><i class="bi bi-plus-circle-fill me-2"></i>Crear curso</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                {% if not form_creacion.fields.profesor.queryset.exists %}
+                    <div class="alert alert-warning py-2">
+                        No hay profesores activos. Primero registra uno en
+                        <a href="{% url 'gestion_profesores' %}" class="alert-link">Gestión de profesores</a>.
+                    </div>
+                {% endif %}
+                <form method="post" action="{% url 'curso_crear' %}" id="formCreacion" novalidate
+                      data-confirmar="¿Está seguro de crear este curso?">
+                    {% csrf_token %}
+                    <input type="hidden" name="q" value="{{ q }}">
+                    {% if con_eliminados %}<input type="hidden" name="eliminados" value="1">{% endif %}
+                    {% include 'administrador/_campos_formulario.html' with form=form_creacion %}
+                </form>
+                <p class="small text-muted mt-3 mb-0">
+                    <i class="bi bi-people me-1"></i>El curso se crea con su lista de alumnos vacía.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" form="formCreacion" class="btn btn-primary">Crear curso</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ abrir_modal|json_script:"abrir-modal" }}
+<script>
+    // Si el servidor devolvió el formulario con errores, se vuelve a abrir su modal
+    const abrir = JSON.parse(document.getElementById('abrir-modal').textContent);
+    if (abrir) bootstrap.Modal.getOrCreateInstance(document.getElementById(abrir)).show();
+</script>
+{% endblock %}

@@ -43,6 +43,51 @@ class Curso(models.Model):
         self.save(update_fields=['activo', 'eliminado_en'])
 
 
+class Modulo(models.Model):
+    """Unidad en que el profesor organiza un curso (RF-10)."""
+
+    curso = models.ForeignKey(Curso, on_delete=models.PROTECT, related_name='modulos')
+    nombre = models.CharField('nombre del módulo', max_length=150)
+    orden = models.PositiveSmallIntegerField(default=1)
+
+    class Meta:
+        verbose_name = 'módulo'
+        verbose_name_plural = 'módulos'
+        ordering = ['orden', 'pk']
+
+    def __str__(self):
+        return self.nombre
+
+    def save(self, *args, **kwargs):
+        # Un módulo nuevo queda al final del curso
+        if not self.pk:
+            ultimo = self.curso.modulos.aggregate(models.Max('orden'))['orden__max'] or 0
+            self.orden = ultimo + 1
+        super().save(*args, **kwargs)
+
+
+class Clase(models.Model):
+    """Sesión con fecha de un módulo; en ella se publica material y se registra la asistencia."""
+
+    modulo = models.ForeignKey(Modulo, on_delete=models.PROTECT, related_name='clases')
+    titulo = models.CharField('título de la clase', max_length=150)
+    fecha = models.DateField()
+    hora_inicio = models.TimeField('hora de inicio')
+    hora_fin = models.TimeField('hora de término')
+
+    class Meta:
+        verbose_name = 'clase'
+        verbose_name_plural = 'clases'
+        ordering = ['fecha', 'hora_inicio']
+        constraints = [
+            models.CheckConstraint(condition=models.Q(hora_fin__gt=models.F('hora_inicio')),
+                                   name='clase_termina_despues_de_empezar'),
+        ]
+
+    def __str__(self):
+        return f'{self.titulo} ({self.fecha:%d/%m/%Y})'
+
+
 class Inscripcion(models.Model):
     """Relación entre un alumno y un curso; la lista de alumnos de un curso nace vacía y se llena en el RF-07."""
 

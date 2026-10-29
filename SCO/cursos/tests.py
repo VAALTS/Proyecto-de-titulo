@@ -4,7 +4,7 @@ from django.urls import reverse
 
 from usuarios.models import Rol, Usuario
 
-from .models import Curso, Inscripcion
+from .models import Clase, Curso, Inscripcion, Modulo
 
 
 def crear_usuario(email, rut, nombre, rol, **campos):
@@ -283,6 +283,119 @@ class MenuProfesorTests(TestCase):
             for nombre_url in ['profesor_inicio', 'profesor_cursos']:
                 with self.subTest(rol=usuario.rol, pagina=nombre_url):
                     self.assertEqual(self.client.get(reverse(nombre_url)).status_code, 302)
+
+
+class CursoDelProfesorTests(TestCase):
+    """RF-10: página del curso con sus módulos, clases y lista de alumnos."""
+
+    CLASE = {'titulo': 'Introducción', 'fecha': '2026-11-02', 'hora_inicio': '09:00', 'hora_fin': '10:30'}
+
+    def setUp(self):
+        self.profesor = crear_usuario('pedro@ejemplo.cl', '11111111-1', 'Pedro', Rol.PROFESOR)
+        self.curso = Curso.objects.create(nombre='Liderazgo', profesor=self.profesor)
+        self.client.force_login(self.profesor)
+
+    def test_mis_cursos_enlaza_a_la_pagina_del_curso(self):
+        self.assertContains(self.client.get(reverse('profesor_cursos')),
+                            f'href="{reverse("profesor_curso", args=[self.curso.pk])}"')
+
+    def test_la_pagina_muestra_modulos_clases_y_alumnos(self):
+        alumno = crear_usuario('ana@ejemplo.cl', '33333333-3', 'Ana', Rol.ALUMNO)
+        Inscripcion.objects.create(alumno=alumno, curso=self.curso)
+        modulo = Modulo.objects.create(curso=self.curso, nombre='Fundamentos')
+        Clase.objects.create(modulo=modulo, titulo='Introducción', fecha='2026-11-02',
+                             hora_inicio='09:00', hora_fin='10:30')
+
+        respuesta = self.client.get(reverse('profesor_curso', args=[self.curso.pk]))
+
+        for texto in ['Fundamentos', 'Introducción', '09:00 a 10:30', 'Ana Pérez', '33333333-3']:
+            with self.subTest(texto=texto):
+                self.assertContains(respuesta, texto)
+
+    def test_los_modulos_nuevos_quedan_al_final_y_se_pueden_reordenar(self):
+        for nombre in ['Uno', 'Dos', 'Tres']:
+            self.client.post(reverse('modulo_crear', args=[self.curso.pk]), {'nombre': nombre})
+        self.assertEqual(list(self.curso.modulos.values_list('nombre', flat=True)), ['Uno', 'Dos', 'Tres'])
+
+        tres = Modulo.objects.get(nombre='Tres')
+        self.client.post(reverse('modulo_mover', args=[tres.pk, 'subir']))
+        self.client.post(reverse('modulo_mover', args=[Modulo.objects.get(nombre='Uno').pk, 'subir']))
+
+        self.assertEqual(list(self.curso.modulos.values_list('nombre', flat=True)), ['Uno', 'Tres', 'Dos'])
+        self.assertEqual(self.client.post(reverse('modulo_mover', args=[tres.pk, 'otra'])).status_code, 404)
+
+    def test_editar_un_modulo(self):
+        modulo = Modulo.objects.create(curso=self.curso, nombre='Fundamentos')
+
+        respuesta = self.client.post(reverse('modulo_editar', args=[modulo.pk]), {'nombre': 'Bases'})
+
+        self.assertRedirects(respuesta, f"{reverse('profesor_curso', args=[self.curso.pk])}#contenido",
+                             fetch_redirect_response=False)
+        modulo.refresh_from_db()
+        self.assertEqual(modulo.nombre, 'Bases')
+
+    def test_crear_y_editar_una_clase(self):
+        modulo = Modulo.objects.create(curso=self.curso, nombre='Fundamentos')
+
+        self.client.post(reverse('clase_crear', args=[modulo.pk]), self.CLASE)
+        clase = modulo.clases.get()
+        self.client.post(reverse('clase_editar', args=[clase.pk]), {**self.CLASE, 'hora_fin': '11:00'})
+
+        clase.refresh_from_db()
+        self.assertEqual((clase.titulo, str(clase.fecha), clase.hora_fin.strftime('%H:%M')),
+                         ('Introducción', '2026-11-02', '11:00'))
+
+    def test_una_clase_debe_terminar_despues_de_empezar(self):
+        modulo = Modulo.objects.create(curso=self.curso, nombre='Fundamentos')
+
+        respuesta = self.client.post(reverse('clase_crear', args=[modulo.pk]), {**self.CLASE, 'hora_fin': '08:00'})
+
+        self.assertContains(respuesta, 'La hora de término debe ser posterior a la de inicio.')
+        self.assertContains(respuesta, '"modalClase"')
+        self.assertContains(respuesta, f'action="{reverse("clase_crear", args=[modulo.pk])}"')
+        self.assertFalse(modulo.clases.exists())
+
+    def test_un_modulo_con_clases_no_se_elimina_pero_uno_vacio_si(self):
+        con_clases = Modulo.objects.create(curso=self.curso, nombre='Con clases')
+        Clase.objects.create(modulo=con_clases, **self.CLASE)
+        vacio = Modulo.objects.create(curso=self.curso, nombre='Vacío')
+
+        self.client.post(reverse('modulo_eliminar', args=[con_clases.pk]))
+        self.client.post(reverse('modulo_eliminar', args=[vacio.pk]))
+
+        self.assertEqual(list(self.curso.modulos.values_list('nombre', flat=True)), ['Con clases'])
+        self.client.post(reverse('clase_eliminar', args=[con_clases.clases.get().pk]))
+        self.assertFalse(con_clases.clases.exists())
+
+    def test_los_cambios_piden_doble_verificacion(self):
+        modulo = Modulo.objects.create(curso=self.curso, nombre='Fundamentos')
+        Clase.objects.create(modulo=modulo, **self.CLASE)
+
+        pagina = self.client.get(reverse('profesor_curso', args=[self.curso.pk])).content.decode()
+
+        for formulario in ['formModulo', 'formClase']:
+            with self.subTest(formulario=formulario):
+                self.assertRegex(pagina, rf'id="{formulario}"[^>]*data-confirmar=')
+        for accion in ['modulos/\\d+/eliminar/', 'clases/\\d+/eliminar/']:
+            with self.subTest(accion=accion):
+                self.assertRegex(pagina, rf'action="[^"]*{accion}"[^>]*data-confirmar=')
+
+    def test_no_se_accede_a_cursos_ajenos_ni_eliminados(self):
+        otro = crear_usuario('marta@ejemplo.cl', '22222222-2', 'Marta', Rol.PROFESOR)
+        ajeno = Curso.objects.create(nombre='Ajeno', profesor=otro)
+        modulo_ajeno = Modulo.objects.create(curso=ajeno, nombre='Ajeno')
+        eliminado = Curso.objects.create(nombre='Eliminado', profesor=self.profesor)
+        eliminado.eliminar()
+
+        for nombre_url, pk in [('profesor_curso', ajeno.pk), ('profesor_curso', eliminado.pk)]:
+            with self.subTest(curso=pk):
+                self.assertEqual(self.client.get(reverse(nombre_url, args=[pk])).status_code, 404)
+        self.assertEqual(self.client.post(reverse('modulo_crear', args=[ajeno.pk]), {'nombre': 'X'}).status_code, 404)
+        self.assertEqual(self.client.post(reverse('modulo_editar', args=[modulo_ajeno.pk]),
+                                          {'nombre': 'X'}).status_code, 404)
+        self.assertEqual(self.client.post(reverse('clase_crear', args=[modulo_ajeno.pk]), self.CLASE).status_code, 404)
+        modulo_ajeno.refresh_from_db()
+        self.assertEqual(modulo_ajeno.nombre, 'Ajeno')
 
 
 class AsignaturasDelProfesorTests(TestCase):

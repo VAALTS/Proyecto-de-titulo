@@ -1,0 +1,242 @@
+{% extends 'base.html' %}
+
+{# RF-10: herramientas del profesor para un curso #}
+
+{% block title %}{{ curso.nombre }}{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
+    <div>
+        <h2 class="fw-bold mb-1"><i class="bi bi-journal-bookmark-fill text-primary me-2"></i>{{ curso.nombre }}</h2>
+        {% if curso.descripcion %}<p class="text-muted mb-0">{{ curso.descripcion }}</p>{% endif %}
+    </div>
+    <a href="{% url 'profesor_cursos' %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i>Mis cursos
+    </a>
+</div>
+
+<ul class="nav nav-tabs flex-nowrap overflow-auto text-nowrap mb-4" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#contenido" type="button" role="tab">
+            <i class="bi bi-collection me-1"></i>Contenido
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#alumnos" type="button" role="tab">
+            <i class="bi bi-people me-1"></i>Alumnos <span class="badge text-bg-secondary">{{ inscripciones|length }}</span>
+        </button>
+    </li>
+    {# Secciones de los pasos siguientes de la fase 3 #}
+    <li class="nav-item"><span class="nav-link disabled">Actividades <small>(próximamente)</small></span></li>
+    <li class="nav-item"><span class="nav-link disabled">Calificaciones <small>(próximamente)</small></span></li>
+    <li class="nav-item"><span class="nav-link disabled">Asistencia <small>(próximamente)</small></span></li>
+</ul>
+
+<div class="tab-content">
+
+    {# ---------- Contenido: módulos y clases ---------- #}
+    <div class="tab-pane fade show active" id="contenido" role="tabpanel">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <p class="text-muted mb-0">Organiza el curso en módulos y agrega las clases de cada uno.</p>
+            <button type="button" class="btn btn-primary abre-modal" data-modal="modalModulo"
+                    data-accion="{% url 'modulo_crear' curso.pk %}" data-titulo-modal="Agregar módulo"
+                    data-confirmar="¿Está seguro de agregar este módulo?">
+                <i class="bi bi-plus-lg me-1"></i>Agregar módulo
+            </button>
+        </div>
+
+        {% for modulo in modulos %}
+            <div class="card shadow-sm border-0 mb-3">
+                <div class="card-header bg-white d-flex flex-wrap gap-2 justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <span class="badge text-bg-primary me-1">{{ forloop.counter }}</span>{{ modulo.nombre }}
+                    </h5>
+                    <div class="d-flex flex-wrap gap-1">
+                        <form method="post" action="{% url 'modulo_mover' modulo.pk 'subir' %}" class="m-0">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-outline-secondary" title="Subir módulo"
+                                    {% if forloop.first %}disabled{% endif %}><i class="bi bi-arrow-up"></i></button>
+                        </form>
+                        <form method="post" action="{% url 'modulo_mover' modulo.pk 'bajar' %}" class="m-0">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-outline-secondary" title="Bajar módulo"
+                                    {% if forloop.last %}disabled{% endif %}><i class="bi bi-arrow-down"></i></button>
+                        </form>
+                        <button type="button" class="btn btn-sm btn-outline-primary abre-modal" data-modal="modalModulo"
+                                data-accion="{% url 'modulo_editar' modulo.pk %}" data-titulo-modal="Editar módulo"
+                                data-confirmar="¿Está seguro de guardar los cambios de este módulo?"
+                                data-nombre="{{ modulo.nombre }}">
+                            <i class="bi bi-pencil"></i><span class="d-none d-md-inline ms-1">Editar</span>
+                        </button>
+                        <form method="post" action="{% url 'modulo_eliminar' modulo.pk %}" class="m-0"
+                              data-confirmar="¿Está seguro de eliminar el módulo «{{ modulo.nombre }}»?">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-outline-danger" title="Eliminar módulo">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                <div class="card-body">
+                    {% if modulo.clases.all %}
+                        <ul class="list-group list-group-flush mb-3">
+                            {% for clase in modulo.clases.all %}
+                                <li class="list-group-item px-0 d-flex flex-wrap gap-2 justify-content-between align-items-center">
+                                    <div>
+                                        <div class="fw-semibold">{{ clase.titulo }}</div>
+                                        <div class="small text-muted">
+                                            <i class="bi bi-calendar-event me-1"></i>{{ clase.fecha|date:"l d/m/Y"|capfirst }}
+                                            · {{ clase.hora_inicio|time:"H:i" }} a {{ clase.hora_fin|time:"H:i" }}
+                                        </div>
+                                    </div>
+                                    <div class="d-flex gap-1">
+                                        <button type="button" class="btn btn-sm btn-outline-primary abre-modal" data-modal="modalClase"
+                                                data-accion="{% url 'clase_editar' clase.pk %}" data-titulo-modal="Editar clase"
+                                                data-confirmar="¿Está seguro de guardar los cambios de esta clase?"
+                                                data-titulo="{{ clase.titulo }}" data-fecha="{{ clase.fecha|date:'Y-m-d' }}"
+                                                data-hora_inicio="{{ clase.hora_inicio|time:'H:i' }}"
+                                                data-hora_fin="{{ clase.hora_fin|time:'H:i' }}">
+                                            <i class="bi bi-pencil"></i><span class="d-none d-md-inline ms-1">Editar</span>
+                                        </button>
+                                        <form method="post" action="{% url 'clase_eliminar' clase.pk %}" class="m-0"
+                                              data-confirmar="¿Está seguro de eliminar la clase «{{ clase.titulo }}»?">
+                                            {% csrf_token %}
+                                            <button type="submit" class="btn btn-sm btn-outline-danger" title="Eliminar clase">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </form>
+                                    </div>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <p class="text-muted small">Este módulo aún no tiene clases.</p>
+                    {% endif %}
+                    <button type="button" class="btn btn-sm btn-outline-primary abre-modal" data-modal="modalClase"
+                            data-accion="{% url 'clase_crear' modulo.pk %}"
+                            data-titulo-modal="Agregar clase a «{{ modulo.nombre }}»"
+                            data-confirmar="¿Está seguro de agregar esta clase?">
+                        <i class="bi bi-plus-lg me-1"></i>Agregar clase
+                    </button>
+                </div>
+            </div>
+        {% empty %}
+            <div class="card shadow-sm border-0">
+                <div class="card-body text-center text-muted py-5">
+                    El curso aún no tiene módulos. Comienza agregando el primero.
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+
+    {# ---------- Lista de alumnos ---------- #}
+    <div class="tab-pane fade" id="alumnos" role="tabpanel">
+        <div class="card shadow-sm border-0">
+            <div class="card-body">
+                {% if inscripciones %}
+                    <div class="table-responsive">
+                        <table class="table align-middle mb-0">
+                            <thead class="table-light">
+                                <tr><th>Nombre</th><th>RUT</th><th class="d-none d-md-table-cell">Correo</th></tr>
+                            </thead>
+                            <tbody>
+                                {% for inscripcion in inscripciones %}
+                                    <tr>
+                                        <td>{{ inscripcion.alumno.get_full_name }}</td>
+                                        <td class="text-nowrap">{{ inscripcion.alumno.rut }}</td>
+                                        <td class="d-none d-md-table-cell text-break">{{ inscripcion.alumno.email }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="text-muted text-center py-4 mb-0">Aún no hay alumnos inscritos. El administrador los inscribe desde la gestión de cursos.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Modales compartidos: los botones .abre-modal cargan la dirección, el título y los datos #}
+<div class="modal fade" id="modalModulo" tabindex="-1" aria-labelledby="tituloModalModulo" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="tituloModalModulo">{% if modal_abierto.id == 'modalModulo' %}{{ modal_abierto.titulo }}{% endif %}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <form method="post" id="formModulo" novalidate
+                      {% if modal_abierto.id == 'modalModulo' %}action="{{ modal_abierto.accion }}"{% endif %}
+                      data-confirmar="¿Está seguro de guardar este módulo?">
+                    {% csrf_token %}
+                    {% include 'administrador/_campos_formulario.html' with form=form_modulo %}
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" form="formModulo" class="btn btn-primary">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalClase" tabindex="-1" aria-labelledby="tituloModalClase" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="tituloModalClase">{% if modal_abierto.id == 'modalClase' %}{{ modal_abierto.titulo }}{% endif %}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <form method="post" id="formClase" novalidate
+                      {% if modal_abierto.id == 'modalClase' %}action="{{ modal_abierto.accion }}"{% endif %}
+                      data-confirmar="¿Está seguro de guardar esta clase?">
+                    {% csrf_token %}
+                    {% include 'administrador/_campos_formulario.html' with form=form_clase %}
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" form="formClase" class="btn btn-primary">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ modal_abierto.id|default:''|json_script:"modal-abierto" }}
+<script>
+    (() => {
+        // Recuerda la pestaña abierta en la dirección (#alumnos), así se vuelve a ella tras guardar
+        const pestanaInicial = document.querySelector(`[data-bs-target="${location.hash}"]`);
+        if (location.hash && pestanaInicial) bootstrap.Tab.getOrCreateInstance(pestanaInicial).show();
+        document.querySelectorAll('[data-bs-toggle="tab"]').forEach((pestana) => {
+            pestana.addEventListener('shown.bs.tab', () => history.replaceState(null, '', pestana.dataset.bsTarget));
+        });
+
+        // Abre el modal de módulo o de clase con los datos del botón (vacío para agregar)
+        document.querySelectorAll('.abre-modal').forEach((boton) => {
+            boton.addEventListener('click', () => {
+                const modal = document.getElementById(boton.dataset.modal);
+                const form = modal.querySelector('form');
+                modal.querySelector('.modal-title').textContent = boton.dataset.tituloModal;
+                form.action = boton.dataset.accion;
+                form.dataset.confirmar = boton.dataset.confirmar;
+                form.querySelectorAll('.alert, .invalid-feedback').forEach((error) => error.remove());
+                form.querySelectorAll('.is-invalid').forEach((campo) => campo.classList.remove('is-invalid'));
+                form.querySelectorAll('input[name]:not([type=hidden])').forEach((campo) => {
+                    campo.value = boton.dataset[campo.name] || '';
+                });
+                bootstrap.Modal.getOrCreateInstance(modal).show();
+            });
+        });
+
+        // Si el servidor devolvió un formulario con errores, se vuelve a abrir su modal
+        const abierto = JSON.parse(document.getElementById('modal-abierto').textContent);
+        if (abierto) bootstrap.Modal.getOrCreateInstance(document.getElementById(abierto)).show();
+    })();
+</script>
+{% endblock %}

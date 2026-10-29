@@ -1,6 +1,7 @@
 import os
 import shutil
 import tempfile
+from datetime import timedelta
 from unittest import mock
 
 from django.conf import settings
@@ -8,10 +9,11 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from usuarios.models import Rol, Usuario
 
-from .models import Clase, Curso, Inscripcion, Material, Modulo
+from .models import Asistencia, Clase, Curso, Inscripcion, Material, Modulo
 
 
 def crear_usuario(email, rut, nombre, rol, **campos):
@@ -540,6 +542,125 @@ class MaterialTests(TestCase):
         self.client.logout()
         self.assertEqual(self.client.get(reverse('material_descargar', args=[material.pk])).status_code, 302)
         self.assertTrue(Material.objects.exists())
+
+
+class AsistenciaTests(TestCase):
+    """RF-12: registrar Presente o Ausente por alumno en cada clase y consultar el historial."""
+
+    def setUp(self):
+        self.profesor = crear_usuario('pedro@ejemplo.cl', '11111111-1', 'Pedro', Rol.PROFESOR)
+        self.ana = crear_usuario('ana@ejemplo.cl', '22222222-2', 'Ana', Rol.ALUMNO)
+        self.luis = crear_usuario('luis@ejemplo.cl', '33333333-3', 'Luis', Rol.ALUMNO)
+        self.curso = Curso.objects.create(nombre='Liderazgo', profesor=self.profesor)
+        self.ins_ana = Inscripcion.objects.create(alumno=self.ana, curso=self.curso)
+        self.ins_luis = Inscripcion.objects.create(alumno=self.luis, curso=self.curso)
+        self.modulo = Modulo.objects.create(curso=self.curso, nombre='Fundamentos')
+        self.clase = self.crear_clase(timezone.localdate())
+        self.client.force_login(self.profesor)
+
+    def crear_clase(self, fecha, titulo='Introducción'):
+        return Clase.objects.create(modulo=self.modulo, titulo=titulo, fecha=fecha, hora_inicio='09:00',
+                                    hora_fin='10:30')
+
+    def registrar(self, ana='presente', luis='ausente', clase=None):
+        clase = clase or self.clase
+        return self.client.post(reverse('clase_asistencia', args=[clase.pk]),
+                                {f'asistencia_{self.ins_ana.pk}': ana, f'asistencia_{self.ins_luis.pk}': luis})
+
+    def test_el_curso_tiene_el_boton_para_pasar_asistencia(self):
+        respuesta = self.client.get(reverse('profesor_curso', args=[self.curso.pk]))
+
+        self.assertContains(respuesta, f'href="{reverse("clase_asistencia", args=[self.clase.pk])}"')
+        self.assertContains(respuesta, 'Pasar asistencia')
+
+    def test_la_lista_muestra_a_los_inscritos_con_presente_y_ausente(self):
+        respuesta = self.client.get(reverse('clase_asistencia', args=[self.clase.pk]))
+
+        for texto in ['Ana Pérez', 'Luis Pérez', 'Presente', 'Ausente']:
+            with self.subTest(texto=texto):
+                self.assertContains(respuesta, texto)
+        self.assertRegex(respuesta.content.decode(), r'id="formAsistencia"[^>]*data-confirmar=')
+
+    def test_registrar_guarda_clase_alumno_estado_y_profesor(self):
+        respuesta = self.registrar()
+
+        self.assertRedirects(respuesta, f"{reverse('profesor_curso', args=[self.curso.pk])}#asistencia",
+                             fetch_redirect_response=False)
+        registros = {a.inscripcion.alumno.primer_nombre: a for a in self.clase.asistencias.select_related(
+            'inscripcion__alumno')}
+        self.assertEqual({nombre: a.presente for nombre, a in registros.items()}, {'Ana': True, 'Luis': False})
+        self.assertTrue(all(a.registrada_por == self.profesor for a in registros.values()))
+        self.assertContains(self.client.get(reverse('profesor_curso', args=[self.curso.pk])), '1 presente y 1 ausente')
+
+    def test_corregir_actualiza_sin_duplicar(self):
+        self.registrar(luis='ausente')
+        self.registrar(luis='presente')
+
+        self.assertEqual(Asistencia.objects.count(), 2)
+        self.assertTrue(Asistencia.objects.get(inscripcion=self.ins_luis).presente)
+
+    def test_solo_acepta_presente_o_ausente_para_todos(self):
+        for valores in [{'ana': 'presente', 'luis': 'tarde'}, {'ana': 'presente', 'luis': ''}]:
+            with self.subTest(valores=valores):
+                respuesta = self.registrar(**valores)
+                self.assertEqual(respuesta.status_code, 200)
+        self.assertFalse(Asistencia.objects.exists())
+
+    def test_una_clase_futura_no_registra_asistencia(self):
+        futura = self.crear_clase(timezone.localdate() + timedelta(days=3), 'Próxima')
+
+        self.assertContains(self.client.get(reverse('clase_asistencia', args=[futura.pk])), 'aún no ocurre')
+        self.registrar(clase=futura)
+
+        self.assertFalse(futura.asistencias.exists())
+
+    def test_el_historial_resume_cada_alumno_y_cada_clase(self):
+        otra = self.crear_clase(timezone.localdate() - timedelta(days=7), 'Anterior')
+        self.registrar(ana='presente', luis='ausente')
+        self.registrar(ana='presente', luis='presente', clase=otra)
+
+        curso = self.client.get(reverse('profesor_curso', args=[self.curso.pk]))
+        resumen = {i.alumno.primer_nombre: (i.clases_presente, i.clases_registradas)
+                   for i in curso.context['inscripciones']}
+        self.assertEqual(resumen, {'Ana': (2, 2), 'Luis': (1, 2)})
+        self.assertContains(curso, '50 %')
+
+        menu = self.client.get(reverse('profesor_asistencia'))
+        self.assertEqual([(c.titulo, c.presentes, c.registradas) for c in menu.context['clases']],
+                         [('Introducción', 1, 2), ('Anterior', 2, 2)])
+
+    def test_un_alumno_retirado_conserva_su_registro(self):
+        self.registrar()
+        self.ins_luis.activa = False
+        self.ins_luis.save()
+
+        respuesta = self.client.get(reverse('clase_asistencia', args=[self.clase.pk]))
+
+        self.assertEqual(len(respuesta.context['form'].fields), 1)
+        self.assertContains(respuesta, 'retirados del curso')
+        self.assertTrue(Asistencia.objects.filter(inscripcion=self.ins_luis).exists())
+
+    def test_una_clase_con_asistencia_no_se_elimina(self):
+        self.registrar()
+
+        self.client.post(reverse('clase_eliminar', args=[self.clase.pk]))
+
+        self.assertTrue(Clase.objects.filter(pk=self.clase.pk).exists())
+
+    def test_el_menu_filtra_por_curso_y_otros_profesores_no_acceden(self):
+        otro_curso = Curso.objects.create(nombre='Excel', profesor=self.profesor)
+        Clase.objects.create(modulo=Modulo.objects.create(curso=otro_curso, nombre='M'), titulo='Tablas',
+                             fecha=timezone.localdate(), hora_inicio='09:00', hora_fin='10:00')
+
+        filtrado = self.client.get(reverse('profesor_asistencia'), {'curso': otro_curso.pk})
+        self.assertEqual([c.titulo for c in filtrado.context['clases']], ['Tablas'])
+        self.assertContains(self.client.get(reverse('profesor_inicio')),
+                            f'href="{reverse("profesor_asistencia")}"')
+
+        self.client.force_login(crear_usuario('marta@ejemplo.cl', '44444444-4', 'Marta', Rol.PROFESOR))
+        self.assertEqual(self.client.get(reverse('clase_asistencia', args=[self.clase.pk])).status_code, 404)
+        self.assertEqual(self.registrar().status_code, 404)
+        self.assertEqual(self.client.get(reverse('profesor_asistencia')).context['clases'], [])
 
 
 class AsignaturasDelProfesorTests(TestCase):

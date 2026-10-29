@@ -6,13 +6,14 @@ from django.db.models import Count, Prefetch, ProtectedError, Q
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from usuarios.models import Rol
 from usuarios.views import profesor_required
 
-from .forms import ClaseForm, MaterialForm, ModuloForm
-from .models import Clase, Curso, Material, Modulo
+from .forms import AsistenciaForm, ClaseForm, MaterialForm, ModuloForm
+from .models import Clase, Curso, Inscripcion, Material, Modulo
 
 # Accesos del menú del profesor (RF-09). Las secciones sin `url` aún no están construidas
 # y se muestran como «Próximamente» para no dejar enlaces rotos.
@@ -24,7 +25,7 @@ SECCIONES_PROFESOR = [
     {'titulo': 'Horario', 'descripcion': 'Consulta tu calendario semanal de clases.',
      'icono': 'bi-calendar-week-fill', 'color': 'warning', 'url': None},
     {'titulo': 'Asistencia por clase', 'descripcion': 'Consulta el historial de asistencia de cada clase.',
-     'icono': 'bi-person-check-fill', 'color': 'danger', 'url': None},
+     'icono': 'bi-person-check-fill', 'color': 'danger', 'url': 'profesor_asistencia'},
 ]
 
 
@@ -54,6 +55,12 @@ def clase_propia(request, pk):
 def material_propio(request, pk):
     return get_object_or_404(Material.objects.select_related('clase__modulo__curso'), pk=pk,
                              clase__modulo__curso__profesor=request.user, clase__modulo__curso__activo=True)
+
+
+def clases_con_asistencia(clases):
+    """Agrega a cada clase cuántos alumnos tienen la asistencia registrada y cuántos estuvieron presentes."""
+    return clases.annotate(registradas=Count('asistencias', distinct=True),
+                           presentes=Count('asistencias', filter=Q(asistencias__presente=True), distinct=True))
 
 
 def volver_al_curso(curso, seccion='contenido'):
@@ -95,12 +102,19 @@ def organizar_material(modulos):
 def pagina_curso(request, curso, form=None, id_modal='', titulo_modal=''):
     """Si un formulario vuelve con errores, se reabre su modal apuntando a la misma dirección."""
     modulos = organizar_material(list(curso.modulos.prefetch_related(
+        Prefetch('clases', queryset=clases_con_asistencia(Clase.objects.all())),
         Prefetch('clases__materiales', queryset=Material.objects.order_by('titulo')))))
+    inscripciones = curso.inscripciones.filter(activa=True).select_related('alumno').order_by(
+        'alumno__apellido_paterno', 'alumno__primer_nombre')
     contexto = {
         'curso': curso,
         'modulos': modulos,
-        'inscripciones': curso.inscripciones.filter(activa=True).select_related('alumno').order_by(
-            'alumno__apellido_paterno', 'alumno__primer_nombre'),
+        'clases': [clase for modulo in modulos for clase in modulo.clases.all()],
+        'hoy': timezone.localdate(),
+        # Historial de cada alumno: clases con asistencia registrada y cuántas estuvo presente (RF-12)
+        'inscripciones': inscripciones.annotate(
+            clases_registradas=Count('asistencias'),
+            clases_presente=Count('asistencias', filter=Q(asistencias__presente=True))),
         'modal_abierto': {'id': id_modal, 'accion': request.path, 'titulo': titulo_modal} if form else None,
     }
     for modal, (nombre, vacio) in FORMULARIOS_CURSO.items():
@@ -297,3 +311,60 @@ def material_descargar_view(request, pk):
         return FileResponse(material.archivo.open('rb'), as_attachment=True, filename=material.nombre_archivo)
     except FileNotFoundError:
         raise Http404
+
+
+# ---------- Registro de asistencia (RF-12) ----------
+
+@profesor_required
+def clase_asistencia_view(request, pk):
+    """Lista de inscritos con Presente/Ausente. Se puede volver a guardar para corregir."""
+    clase = clase_propia(request, pk)
+    curso = clase.modulo.curso
+    inscripciones = curso.inscripciones.filter(activa=True).select_related('alumno').order_by(
+        'alumno__apellido_paterno', 'alumno__primer_nombre')
+    es_futura = clase.fecha > timezone.localdate()
+    form = AsistenciaForm(clase, inscripciones, request.POST or None)
+
+    if request.method == 'POST':
+        if es_futura:
+            messages.error(request, 'La asistencia se registra desde el día de la clase.')
+            return redirect('clase_asistencia', pk=clase.pk)
+        if form.is_valid():
+            form.save(request.user)
+            presentes = sum(valor == 'presente' for valor in form.cleaned_data.values())
+            messages.success(request, f'Se guardó la asistencia de «{clase.titulo}»: {presentes} presente'
+                                      f'{"s" if presentes != 1 else ""} y {len(form.cleaned_data) - presentes} '
+                                      f'ausente{"s" if len(form.cleaned_data) - presentes != 1 else ""}.')
+            return volver_al_curso(curso, 'asistencia')
+
+    # Alumnos que se retiraron después de un registro: su asistencia se conserva y se muestra aparte
+    retirados = clase.asistencias.filter(inscripcion__activa=False).select_related('inscripcion__alumno')
+    return render(request, 'profesor/asistencia_clase.html', {
+        'clase': clase,
+        'curso': curso,
+        'form': form,
+        'es_futura': es_futura,
+        'ultimo_registro': clase.asistencias.select_related('registrada_por').order_by('-fecha_registro').first(),
+        'retirados': retirados,
+    })
+
+
+@profesor_required
+def profesor_asistencia_view(request):
+    """Asistencia por clase (RF-09): todas las clases de sus cursos, con filtro por curso."""
+    cursos = cursos_del_profesor(request.user)
+    clases = clases_con_asistencia(Clase.objects.filter(modulo__curso__in=cursos).select_related('modulo__curso'))
+    curso_elegido = request.GET.get('curso', '')
+    if curso_elegido.isdigit():
+        clases = clases.filter(modulo__curso_id=int(curso_elegido))
+    clases = list(clases.order_by('-fecha', '-hora_inicio'))
+    inscritos = dict(Inscripcion.objects.filter(curso__in=cursos, activa=True).values('curso')
+                     .annotate(total=Count('pk')).values_list('curso', 'total'))
+    for clase in clases:
+        clase.inscritos = inscritos.get(clase.modulo.curso_id, 0)
+    return render(request, 'profesor/asistencia.html', {
+        'cursos': cursos,
+        'clases': clases,
+        'curso_elegido': curso_elegido,
+        'hoy': timezone.localdate(),
+    })

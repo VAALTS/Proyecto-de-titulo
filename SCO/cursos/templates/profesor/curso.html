@@ -29,7 +29,11 @@
     {# Secciones de los pasos siguientes de la fase 3 #}
     <li class="nav-item"><span class="nav-link disabled">Actividades <small>(próximamente)</small></span></li>
     <li class="nav-item"><span class="nav-link disabled">Calificaciones <small>(próximamente)</small></span></li>
-    <li class="nav-item"><span class="nav-link disabled">Asistencia <small>(próximamente)</small></span></li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#asistencia" type="button" role="tab">
+            <i class="bi bi-person-check me-1"></i>Asistencia
+        </button>
+    </li>
 </ul>
 
 <div class="tab-content">
@@ -90,7 +94,12 @@
                                             · {{ clase.hora_inicio|time:"H:i" }} a {{ clase.hora_fin|time:"H:i" }}
                                         </div>
                                     </div>
-                                    <div class="d-flex gap-1">
+                                    <div class="d-flex flex-wrap gap-1">
+                                        {# RF-10: botón para iniciar el registro de asistencia de la clase #}
+                                        <a href="{% url 'clase_asistencia' clase.pk %}"
+                                           class="btn btn-sm {% if clase.registradas %}btn-outline-success{% else %}btn-success{% endif %}">
+                                            <i class="bi bi-person-check me-1"></i>{% if clase.registradas %}Asistencia: {{ clase.presentes }}/{{ clase.registradas }}{% else %}Pasar asistencia{% endif %}
+                                        </a>
                                         <button type="button" class="btn btn-sm btn-outline-primary abre-modal" data-modal="modalClase"
                                                 data-accion="{% url 'clase_editar' clase.pk %}" data-titulo-modal="Editar clase"
                                                 data-confirmar="¿Está seguro de guardar los cambios de esta clase?"
@@ -147,6 +156,78 @@
                 </div>
             </div>
         {% endfor %}
+    </div>
+
+    {# ---------- Asistencia (RF-12) ---------- #}
+    <div class="tab-pane fade" id="asistencia" role="tabpanel">
+        <div class="row g-4">
+            <div class="col-12 col-lg-7">
+                <div class="card shadow-sm border-0 h-100">
+                    <div class="card-body">
+                        <h5 class="card-title">Clases</h5>
+                        {% if clases %}
+                            <div class="table-responsive">
+                                <table class="table align-middle mb-0">
+                                    <thead class="table-light">
+                                        <tr><th>Fecha</th><th>Clase</th><th>Asistencia</th><th></th></tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for clase in clases %}
+                                            <tr>
+                                                <td class="text-nowrap">{{ clase.fecha|date:"d/m/Y" }}</td>
+                                                <td>{{ clase.titulo }}</td>
+                                                <td class="text-nowrap">
+                                                    {% if clase.registradas %}
+                                                        <span class="badge text-bg-success">{{ clase.presentes }} de {{ clase.registradas }} presentes</span>
+                                                    {% elif clase.fecha > hoy %}
+                                                        <span class="badge text-bg-light text-muted">Próxima</span>
+                                                    {% else %}
+                                                        <span class="badge text-bg-warning">Pendiente</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td class="text-end">
+                                                    <a href="{% url 'clase_asistencia' clase.pk %}" class="btn btn-sm btn-outline-success text-nowrap">
+                                                        {% if clase.registradas %}Ver o corregir{% else %}Pasar asistencia{% endif %}
+                                                    </a>
+                                                </td>
+                                            </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {% else %}
+                            <p class="text-muted mb-0">Agrega clases en la pestaña Contenido para registrar su asistencia.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-lg-5">
+                <div class="card shadow-sm border-0 h-100">
+                    <div class="card-body">
+                        <h5 class="card-title">Historial por alumno</h5>
+                        {% if inscripciones %}
+                            <ul class="list-group list-group-flush">
+                                {% for inscripcion in inscripciones %}
+                                    <li class="list-group-item px-0 d-flex justify-content-between align-items-center">
+                                        <span>{{ inscripcion.alumno.get_full_name }}</span>
+                                        {% if inscripcion.clases_registradas %}
+                                            <span class="small text-nowrap">
+                                                {{ inscripcion.clases_presente }} de {{ inscripcion.clases_registradas }} clases
+                                                <span class="badge text-bg-primary">{% widthratio inscripcion.clases_presente inscripcion.clases_registradas 100 %} %</span>
+                                            </span>
+                                        {% else %}
+                                            <span class="small text-muted">Sin registros</span>
+                                        {% endif %}
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <p class="text-muted mb-0">Aún no hay alumnos inscritos.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     {# ---------- Lista de alumnos ---------- #}

@@ -7,7 +7,7 @@ from django.utils import timezone
 from usuarios.forms import EstiloBootstrapMixin
 from usuarios.models import Rol, Usuario
 
-from .models import Clase, Curso, Inscripcion, Material, Modulo
+from .models import Asistencia, Clase, Curso, Inscripcion, Material, Modulo
 
 
 class ProfesorChoiceField(forms.ModelChoiceField):
@@ -164,3 +164,40 @@ class MaterialForm(EstiloBootstrapMixin, forms.ModelForm):
         if anterior:
             anterior.delete(save=False)
         return material
+
+
+class AsistenciaForm(forms.Form):
+    """RF-12: un campo Presente/Ausente por cada alumno inscrito en el curso de la clase."""
+
+    OPCIONES = [('presente', 'Presente'), ('ausente', 'Ausente')]
+
+    def __init__(self, clase, inscripciones, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.clase = clase
+        self.inscripciones = list(inscripciones)
+        registradas = {a.inscripcion_id: a.presente for a in clase.asistencias.all()}
+        for inscripcion in self.inscripciones:
+            # Lo ya registrado se muestra marcado; si la clase no tiene registro, todos parten presentes
+            presente = registradas.get(inscripcion.pk, True)
+            self.fields[self.nombre_campo(inscripcion)] = forms.ChoiceField(
+                choices=self.OPCIONES, initial='presente' if presente else 'ausente',
+                label=inscripcion.alumno.get_full_name(), widget=forms.RadioSelect,
+                error_messages={'required': 'Marque Presente o Ausente.'},
+            )
+
+    @staticmethod
+    def nombre_campo(inscripcion):
+        return f'asistencia_{inscripcion.pk}'
+
+    def filas(self):
+        """Cada alumno con su campo, para dibujar la lista en la plantilla."""
+        return [(inscripcion, self[self.nombre_campo(inscripcion)]) for inscripcion in self.inscripciones]
+
+    @transaction.atomic
+    def save(self, profesor):
+        for inscripcion in self.inscripciones:
+            Asistencia.objects.update_or_create(
+                clase=self.clase, inscripcion=inscripcion,
+                defaults={'presente': self.cleaned_data[self.nombre_campo(inscripcion)] == 'presente',
+                          'registrada_por': profesor},
+            )

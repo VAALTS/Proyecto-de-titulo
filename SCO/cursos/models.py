@@ -152,3 +152,27 @@ class Inscripcion(models.Model):
 
     def __str__(self):
         return f'{self.alumno} en {self.curso}'
+
+
+class Asistencia(models.Model):
+    """Estado de un alumno en una clase: solo Presente o Ausente (RF-12).
+
+    La fecha queda dada por la clase; fecha_registro guarda cuándo se registró o corrigió.
+    """
+
+    clase = models.ForeignKey(Clase, on_delete=models.PROTECT, related_name='asistencias')
+    inscripcion = models.ForeignKey(Inscripcion, on_delete=models.PROTECT, related_name='asistencias')
+    registrada_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+                                       related_name='asistencias_registradas')
+    presente = models.BooleanField()
+    fecha_registro = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'asistencia'
+        verbose_name_plural = 'asistencias'
+        constraints = [
+            models.UniqueConstraint(fields=['clase', 'inscripcion'], name='asistencia_unica_por_clase'),
+        ]
+
+    def __str__(self):
+        return f'{self.inscripcion.alumno} en {self.clase}: {"presente" if self.presente else "ausente"}'

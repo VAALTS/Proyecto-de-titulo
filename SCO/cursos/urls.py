@@ -26,6 +26,9 @@ urlpatterns = [
     path('profesor/material/<int:pk>/visibilidad/', views_profesor.material_visibilidad_view,
          name='material_visibilidad'),
     path('profesor/material/<int:pk>/eliminar/', views_profesor.material_eliminar_view, name='material_eliminar'),
+    # Registro de asistencia (RF-12)
+    path('profesor/clases/<int:pk>/asistencia/', views_profesor.clase_asistencia_view, name='clase_asistencia'),
+    path('profesor/asistencia/', views_profesor.profesor_asistencia_view, name='profesor_asistencia'),
     # Descarga protegida: la usan el profesor y, en la fase 4, los alumnos inscritos
     path('material/<int:pk>/descargar/', views_profesor.material_descargar_view, name='material_descargar'),
 

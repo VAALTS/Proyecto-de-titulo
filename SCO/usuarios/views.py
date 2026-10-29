@@ -31,6 +31,7 @@ def tiene_rol(rol):
 
 
 admin_required = tiene_rol(Rol.ADMINISTRADOR)
+profesor_required = tiene_rol(Rol.PROFESOR)
 
 
 # ---------- Inicio de sesión ----------
@@ -78,12 +79,8 @@ def perfil_view(request):
     return render(request, 'perfil/perfil.html', {'form': form})
 
 
-# ---------- Inicio de profesor y alumno (sus menús llegan en las fases 3 y 4) ----------
-
-@tiene_rol(Rol.PROFESOR)
-def profesor_inicio_view(request):
-    return render(request, 'inicio_de_sesion/home.html')
-
+# ---------- Inicio del alumno (su menú llega en la fase 4) ----------
+# El menú del profesor está en cursos/views_profesor.py (RF-09)
 
 @tiene_rol(Rol.ALUMNO)
 def alumno_inicio_view(request):

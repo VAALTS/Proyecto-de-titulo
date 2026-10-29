@@ -1,8 +1,12 @@
 from django.urls import path
 
-from . import views
+from . import views, views_profesor
 
 urlpatterns = [
+    # Menú y cursos del profesor (RF-09 y RF-10)
+    path('profesor/', views_profesor.profesor_inicio_view, name='profesor_inicio'),
+    path('profesor/cursos/', views_profesor.profesor_cursos_view, name='profesor_cursos'),
+
     # Gestión de cursos del administrador (RF-06)
     path('panel/cursos/', views.gestion_cursos_view, name='gestion_cursos'),
     path('panel/cursos/crear/', views.curso_crear_view, name='curso_crear'),

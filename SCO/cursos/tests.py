@@ -234,6 +234,57 @@ class InscripcionTests(TestCase):
         self.assertFalse(Inscripcion.objects.exists())
 
 
+class MenuProfesorTests(TestCase):
+    """RF-09: menú del profesor y la lista de sus cursos."""
+
+    def setUp(self):
+        self.profesor = crear_usuario('pedro@ejemplo.cl', '11111111-1', 'Pedro', Rol.PROFESOR)
+        self.client.force_login(self.profesor)
+
+    def test_el_menu_tiene_los_cuatro_accesos_del_requerimiento(self):
+        respuesta = self.client.get(reverse('profesor_inicio'))
+
+        for titulo in ['Cursos', 'Gestión de Evaluaciones', 'Horario', 'Asistencia por clase']:
+            with self.subTest(seccion=titulo):
+                self.assertContains(respuesta, f'<h5 class="card-title mt-3">{titulo}</h5>', html=True)
+        self.assertContains(respuesta, f'href="{reverse("profesor_cursos")}"')
+
+    def test_al_ingresar_el_profesor_llega_a_su_menu(self):
+        self.client.logout()
+
+        respuesta = self.client.post(reverse('login'), {'email': 'pedro@ejemplo.cl', 'password': 'clave-segura-123'},
+                                     follow=True)
+
+        self.assertRedirects(respuesta, reverse('profesor_inicio'))
+        self.assertTemplateUsed(respuesta, 'profesor/menu.html')
+
+    def test_mis_cursos_muestra_solo_sus_cursos_activos_con_sus_alumnos(self):
+        otro = crear_usuario('marta@ejemplo.cl', '22222222-2', 'Marta', Rol.PROFESOR)
+        alumno = crear_usuario('ana@ejemplo.cl', '33333333-3', 'Ana', Rol.ALUMNO)
+        propio = Curso.objects.create(nombre='Liderazgo', profesor=self.profesor)
+        Curso.objects.create(nombre='Curso eliminado', profesor=self.profesor).eliminar()
+        Curso.objects.create(nombre='Curso ajeno', profesor=otro)
+        Inscripcion.objects.create(alumno=alumno, curso=propio)
+
+        respuesta = self.client.get(reverse('profesor_cursos'))
+
+        self.assertEqual([(c.nombre, c.inscritos) for c in respuesta.context['cursos']], [('Liderazgo', 1)])
+        self.assertContains(respuesta, '1 alumno')
+
+    def test_sin_cursos_muestra_un_aviso(self):
+        self.assertContains(self.client.get(reverse('profesor_cursos')), 'Aún no tienes cursos a cargo')
+
+    def test_otros_roles_no_entran_a_las_paginas_del_profesor(self):
+        alumno = crear_usuario('ana@ejemplo.cl', '33333333-3', 'Ana', Rol.ALUMNO)
+        admin = Usuario.objects.create_superuser('admin@ejemplo.cl', 'clave-segura-123', primer_nombre='Admin')
+
+        for usuario in [alumno, admin]:
+            self.client.force_login(usuario)
+            for nombre_url in ['profesor_inicio', 'profesor_cursos']:
+                with self.subTest(rol=usuario.rol, pagina=nombre_url):
+                    self.assertEqual(self.client.get(reverse(nombre_url)).status_code, 302)
+
+
 class AsignaturasDelProfesorTests(TestCase):
     """RF-05: el perfil del profesor muestra las asignaturas que imparte."""
 

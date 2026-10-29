@@ -131,6 +131,10 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
+# Archivos subidos (material de clases, entregas). No tienen URL pública: se descargan
+# a través de una vista que revisa los permisos de quien descarga (RF-10 y RF-16).
+MEDIA_ROOT = Path(os.environ.get('MEDIA_ROOT', BASE_DIR.parent / 'media'))
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 

@@ -1,10 +1,10 @@
-{# Campos de un formulario en dos columnas, con sus errores al estilo de Bootstrap #}
+{# Campos de un formulario en dos columnas (o en una, con una_columna=True), con sus errores al estilo de Bootstrap #}
 {% for error in form.non_field_errors %}
     <div class="alert alert-danger py-2" role="alert">{{ error }}</div>
 {% endfor %}
 <div class="row g-3">
     {% for campo in form %}
-        <div class="col-12{% if campo.widget_type != 'textarea' %} col-md-6{% endif %}">
+        <div class="col-12{% if campo.widget_type != 'textarea' and not una_columna %} col-md-6{% endif %}" data-campo="{{ campo.name }}">
             <label for="{{ campo.id_for_label }}" class="form-label">
                 {{ campo.label }}{% if campo.field.required %} <span class="text-danger">*</span>{% endif %}
             </label>
@@ -12,6 +12,7 @@
             {% for error in campo.errors %}
                 <div class="invalid-feedback">{{ error }}</div>
             {% endfor %}
+            {% if campo.help_text %}<div class="form-text">{{ campo.help_text }}</div>{% endif %}
         </div>
     {% endfor %}
 </div>

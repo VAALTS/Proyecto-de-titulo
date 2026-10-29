@@ -81,7 +81,8 @@
                     {% if modulo.clases.all %}
                         <ul class="list-group list-group-flush mb-3">
                             {% for clase in modulo.clases.all %}
-                                <li class="list-group-item px-0 d-flex flex-wrap gap-2 justify-content-between align-items-center">
+                                <li class="list-group-item px-0">
+                                  <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center">
                                     <div>
                                         <div class="fw-semibold">{{ clase.titulo }}</div>
                                         <div class="small text-muted">
@@ -106,6 +107,25 @@
                                             </button>
                                         </form>
                                     </div>
+                                  </div>
+
+                                  {# Material de la clase #}
+                                  <div class="ms-md-4 mt-2 p-2 bg-light rounded">
+                                      {% for material in clase.raiz %}
+                                          {% include 'profesor/_material.html' %}
+                                          {% for material in material.hijos %}
+                                              <div class="ms-4">{% include 'profesor/_material.html' %}</div>
+                                          {% endfor %}
+                                      {% empty %}
+                                          <p class="small text-muted mb-1">Sin material todavía.</p>
+                                      {% endfor %}
+                                      <button type="button" class="btn btn-sm btn-link px-0 abre-modal" data-modal="modalMaterial"
+                                              data-accion="{% url 'material_crear' clase.pk %}"
+                                              data-titulo-modal="Agregar material a «{{ clase.titulo }}»"
+                                              data-confirmar="¿Está seguro de agregar este material?" data-tipo="archivo">
+                                          <i class="bi bi-paperclip me-1"></i>Agregar material
+                                      </button>
+                                  </div>
                                 </li>
                             {% endfor %}
                         </ul>
@@ -204,6 +224,30 @@
         </div>
     </div>
 </div>
+
+<div class="modal fade" id="modalMaterial" tabindex="-1" aria-labelledby="tituloModalMaterial" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="tituloModalMaterial">{% if modal_abierto.id == 'modalMaterial' %}{{ modal_abierto.titulo }}{% endif %}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <form method="post" id="formMaterial" enctype="multipart/form-data" novalidate
+                      {% if modal_abierto.id == 'modalMaterial' %}action="{{ modal_abierto.accion }}"{% endif %}
+                      data-confirmar="¿Está seguro de guardar este material?">
+                    {% csrf_token %}
+                    {% include 'administrador/_campos_formulario.html' with form=form_material una_columna=True %}
+                    <p class="small text-muted mt-2 mb-0 d-none" id="archivoActual"></p>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" form="formMaterial" class="btn btn-primary">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -217,7 +261,27 @@
             pestana.addEventListener('shown.bs.tab', () => history.replaceState(null, '', pestana.dataset.bsTarget));
         });
 
-        // Abre el modal de módulo o de clase con los datos del botón (vacío para agregar)
+        // Material: según el tipo se pide el archivo o la dirección del enlace; una carpeta no pide ninguno
+        const formMaterial = document.getElementById('formMaterial');
+        const tipoMaterial = document.getElementById('material_tipo');
+        function actualizarCamposMaterial() {
+            formMaterial.querySelector('[data-campo="archivo"]').classList.toggle('d-none', tipoMaterial.value !== 'archivo');
+            formMaterial.querySelector('[data-campo="url"]').classList.toggle('d-none', tipoMaterial.value !== 'enlace');
+            document.getElementById('archivoActual').classList.toggle(
+                'd-none', tipoMaterial.value !== 'archivo' || !document.getElementById('archivoActual').textContent);
+        }
+        function prepararMaterial(boton) {
+            // Al editar no se cambia el tipo; dentro de una carpeta no se crean otras carpetas
+            tipoMaterial.disabled = Boolean(boton.dataset.editando);
+            tipoMaterial.querySelector('option[value="carpeta"]').hidden = Boolean(boton.dataset.enCarpeta);
+            document.getElementById('archivoActual').textContent = boton.dataset.archivoActual
+                ? `Archivo actual: ${boton.dataset.archivoActual}. Deje el campo vacío para conservarlo.` : '';
+            actualizarCamposMaterial();
+        }
+        tipoMaterial.addEventListener('change', actualizarCamposMaterial);
+        actualizarCamposMaterial();
+
+        // Abre el modal de módulo, clase o material con los datos del botón (vacío para agregar)
         document.querySelectorAll('.abre-modal').forEach((boton) => {
             boton.addEventListener('click', () => {
                 const modal = document.getElementById(boton.dataset.modal);
@@ -227,9 +291,10 @@
                 form.dataset.confirmar = boton.dataset.confirmar;
                 form.querySelectorAll('.alert, .invalid-feedback').forEach((error) => error.remove());
                 form.querySelectorAll('.is-invalid').forEach((campo) => campo.classList.remove('is-invalid'));
-                form.querySelectorAll('input[name]:not([type=hidden])').forEach((campo) => {
+                form.querySelectorAll('input[name]:not([type=hidden]), select[name]').forEach((campo) => {
                     campo.value = boton.dataset[campo.name] || '';
                 });
+                if (form === formMaterial) prepararMaterial(boton);
                 bootstrap.Modal.getOrCreateInstance(modal).show();
             });
         });

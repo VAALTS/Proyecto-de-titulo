@@ -8,3 +8,6 @@ __pycache__/
 
 # Bases de datos locales
 *.sqlite3
+
+# Archivos subidos por los usuarios (material de clases y entregas)
+/media/

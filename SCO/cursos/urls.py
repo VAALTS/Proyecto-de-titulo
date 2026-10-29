@@ -18,6 +18,17 @@ urlpatterns = [
     path('profesor/clases/<int:pk>/editar/', views_profesor.clase_editar_view, name='clase_editar'),
     path('profesor/clases/<int:pk>/eliminar/', views_profesor.clase_eliminar_view, name='clase_eliminar'),
 
+    # Material de las clases (RF-10)
+    path('profesor/clases/<int:pk>/material/crear/', views_profesor.material_crear_view, name='material_crear'),
+    path('profesor/material/<int:pk>/agregar/', views_profesor.material_crear_en_carpeta_view,
+         name='material_crear_en_carpeta'),
+    path('profesor/material/<int:pk>/editar/', views_profesor.material_editar_view, name='material_editar'),
+    path('profesor/material/<int:pk>/visibilidad/', views_profesor.material_visibilidad_view,
+         name='material_visibilidad'),
+    path('profesor/material/<int:pk>/eliminar/', views_profesor.material_eliminar_view, name='material_eliminar'),
+    # Descarga protegida: la usan el profesor y, en la fase 4, los alumnos inscritos
+    path('material/<int:pk>/descargar/', views_profesor.material_descargar_view, name='material_descargar'),
+
     # Gestión de cursos del administrador (RF-06)
     path('panel/cursos/', views.gestion_cursos_view, name='gestion_cursos'),
     path('panel/cursos/crear/', views.curso_crear_view, name='curso_crear'),

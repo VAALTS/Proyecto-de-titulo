@@ -1,4 +1,5 @@
 from django import forms
+from django.core.validators import FileExtensionValidator
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -6,7 +7,7 @@ from django.utils import timezone
 from usuarios.forms import EstiloBootstrapMixin
 from usuarios.models import Rol, Usuario
 
-from .models import Clase, Curso, Inscripcion, Modulo
+from .models import Clase, Curso, Inscripcion, Material, Modulo
 
 
 class ProfesorChoiceField(forms.ModelChoiceField):
@@ -103,3 +104,63 @@ class ClaseForm(EstiloBootstrapMixin, forms.ModelForm):
         if inicio and fin and fin <= inicio:
             self.add_error('hora_fin', 'La hora de término debe ser posterior a la de inicio.')
         return datos
+
+
+TAMANO_MAXIMO_MB = 20
+EXTENSIONES_PERMITIDAS = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv', 'jpg', 'jpeg', 'png',
+                          'gif', 'zip']
+
+
+class MaterialForm(EstiloBootstrapMixin, forms.ModelForm):
+    """RF-10: archivo, enlace o carpeta de una clase. El tipo no cambia al editar."""
+
+    class Meta:
+        model = Material
+        fields = ['tipo', 'titulo', 'archivo', 'url']
+        labels = {'tipo': 'Tipo de material', 'titulo': 'Título', 'archivo': 'Archivo', 'url': 'Dirección del enlace'}
+        widgets = {'archivo': forms.FileInput, 'url': forms.URLInput(attrs={'placeholder': 'https://'})}
+        help_texts = {
+            'archivo': f'Hasta {TAMANO_MAXIMO_MB} MB. Formatos: {", ".join(EXTENSIONES_PERMITIDAS)}. '
+                       'Para videos, agregue un enlace (YouTube, Drive).',
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['archivo'].validators.append(FileExtensionValidator(EXTENSIONES_PERMITIDAS))
+        if self.instance.pk:
+            self.fields['tipo'].disabled = True
+        elif self.instance.carpeta_id:
+            # Las carpetas tienen un solo nivel
+            self.fields['tipo'].choices = [opcion for opcion in Material.Tipo.choices
+                                           if opcion[0] != Material.Tipo.CARPETA]
+
+    def clean_archivo(self):
+        archivo = self.cleaned_data.get('archivo')
+        if archivo and archivo.size > TAMANO_MAXIMO_MB * 1024 * 1024:
+            raise forms.ValidationError(f'El archivo pesa más de {TAMANO_MAXIMO_MB} MB.')
+        return archivo
+
+    def clean(self):
+        datos = super().clean()
+        tipo = datos.get('tipo')
+        if tipo == Material.Tipo.ARCHIVO:
+            if not datos.get('archivo') and 'archivo' not in self.errors:
+                self.add_error('archivo', 'Seleccione el archivo que desea subir.')
+            datos['url'] = None
+        elif tipo == Material.Tipo.ENLACE:
+            if not datos.get('url') and 'url' not in self.errors:
+                self.add_error('url', 'Ingrese la dirección del enlace.')
+            datos['archivo'] = None
+        elif tipo == Material.Tipo.CARPETA:
+            datos['archivo'] = datos['url'] = None
+        return datos
+
+    def save(self, commit=True):
+        # Si se reemplazó el archivo, el anterior se borra del disco
+        anterior = None
+        if self.instance.pk and 'archivo' in self.changed_data:
+            anterior = Material.objects.get(pk=self.instance.pk).archivo
+        material = super().save(commit)
+        if anterior:
+            anterior.delete(save=False)
+        return material

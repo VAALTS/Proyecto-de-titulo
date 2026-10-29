@@ -1,3 +1,6 @@
+import os
+import uuid
+
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
@@ -86,6 +89,48 @@ class Clase(models.Model):
 
     def __str__(self):
         return f'{self.titulo} ({self.fecha:%d/%m/%Y})'
+
+
+def ruta_material(material, nombre_archivo):
+    # Una carpeta al azar por archivo evita choques de nombres y conserva el nombre original
+    return f'material/curso_{material.clase.modulo.curso_id}/{uuid.uuid4().hex}/{nombre_archivo}'
+
+
+class Material(models.Model):
+    """Recurso que el profesor publica en una clase: un archivo, un enlace o una carpeta (RF-10)."""
+
+    class Tipo(models.TextChoices):
+        ARCHIVO = 'archivo', 'Archivo'
+        ENLACE = 'enlace', 'Enlace'
+        CARPETA = 'carpeta', 'Carpeta'
+
+    clase = models.ForeignKey(Clase, on_delete=models.PROTECT, related_name='materiales')
+    # Las carpetas tienen un solo nivel: dentro de una carpeta no puede haber otra
+    carpeta = models.ForeignKey('self', on_delete=models.PROTECT, null=True, blank=True, related_name='contenido',
+                                limit_choices_to={'tipo': Tipo.CARPETA})
+    subido_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+                                   related_name='materiales_subidos')
+    titulo = models.CharField('título', max_length=150)
+    tipo = models.CharField(max_length=10, choices=Tipo.choices)
+    archivo = models.FileField(upload_to=ruta_material, max_length=255, null=True, blank=True)
+    url = models.URLField('dirección del enlace', max_length=500, null=True, blank=True)
+    # Falso si el profesor lo oculta a los alumnos
+    visible = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = 'material'
+        verbose_name_plural = 'materiales'
+        ordering = ['titulo']
+
+    def __str__(self):
+        return self.titulo
+
+    @property
+    def nombre_archivo(self):
+        return os.path.basename(self.archivo.name) if self.archivo else ''
+
+    def visible_para_alumnos(self):
+        return self.visible and (self.carpeta is None or self.carpeta.visible)
 
 
 class Inscripcion(models.Model):

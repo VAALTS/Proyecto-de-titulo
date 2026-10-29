@@ -1,10 +1,17 @@
+import os
+import shutil
+import tempfile
+from unittest import mock
+
+from django.conf import settings
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from usuarios.models import Rol, Usuario
 
-from .models import Clase, Curso, Inscripcion, Modulo
+from .models import Clase, Curso, Inscripcion, Material, Modulo
 
 
 def crear_usuario(email, rut, nombre, rol, **campos):
@@ -396,6 +403,143 @@ class CursoDelProfesorTests(TestCase):
         self.assertEqual(self.client.post(reverse('clase_crear', args=[modulo_ajeno.pk]), self.CLASE).status_code, 404)
         modulo_ajeno.refresh_from_db()
         self.assertEqual(modulo_ajeno.nombre, 'Ajeno')
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix='adapt_media_'))
+class MaterialTests(TestCase):
+    """RF-10: subir, editar, ocultar y descargar el material de una clase."""
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(settings.MEDIA_ROOT, ignore_errors=True)
+        super().tearDownClass()
+
+    def setUp(self):
+        self.profesor = crear_usuario('pedro@ejemplo.cl', '11111111-1', 'Pedro', Rol.PROFESOR)
+        self.alumno = crear_usuario('ana@ejemplo.cl', '33333333-3', 'Ana', Rol.ALUMNO)
+        self.curso = Curso.objects.create(nombre='Liderazgo', profesor=self.profesor)
+        Inscripcion.objects.create(alumno=self.alumno, curso=self.curso)
+        modulo = Modulo.objects.create(curso=self.curso, nombre='Fundamentos')
+        self.clase = Clase.objects.create(modulo=modulo, titulo='Introducción', fecha='2026-11-02',
+                                          hora_inicio='09:00', hora_fin='10:30')
+        self.client.force_login(self.profesor)
+
+    def subir(self, titulo='Guía 1', nombre='guia.pdf', contenido=b'%PDF-1.4 prueba', url=None, **datos):
+        url = url or reverse('material_crear', args=[self.clase.pk])
+        archivo = SimpleUploadedFile(nombre, contenido, content_type='application/pdf')
+        return self.client.post(url, {'tipo': 'archivo', 'titulo': titulo, 'archivo': archivo, **datos})
+
+    def test_subir_un_archivo_y_descargarlo_con_su_nombre_original(self):
+        self.subir()
+
+        material = self.clase.materiales.get()
+        self.assertEqual((material.tipo, material.subido_por, material.nombre_archivo),
+                         ('archivo', self.profesor, 'guia.pdf'))
+        respuesta = self.client.get(reverse('material_descargar', args=[material.pk]))
+        self.assertEqual(b''.join(respuesta.streaming_content), b'%PDF-1.4 prueba')
+        self.assertIn('attachment; filename="guia.pdf"', respuesta['Content-Disposition'])
+
+    def test_agregar_un_enlace_y_una_carpeta_con_contenido(self):
+        self.client.post(reverse('material_crear', args=[self.clase.pk]),
+                         {'tipo': 'enlace', 'titulo': 'Video', 'url': 'https://www.youtube.com/watch?v=abc'})
+        self.client.post(reverse('material_crear', args=[self.clase.pk]), {'tipo': 'carpeta', 'titulo': 'Lecturas'})
+        carpeta = self.clase.materiales.get(tipo='carpeta')
+        self.subir(titulo='Lectura 1', url=reverse('material_crear_en_carpeta', args=[carpeta.pk]))
+
+        self.assertEqual(carpeta.contenido.get().titulo, 'Lectura 1')
+        pagina = self.client.get(reverse('profesor_curso', args=[self.curso.pk]))
+        self.assertContains(pagina, 'href="https://www.youtube.com/watch?v=abc" target="_blank"')
+        self.assertEqual([m.titulo for m in pagina.context['modulos'][0].clases.all()[0].raiz], ['Lecturas', 'Video'])
+
+    def test_valida_lo_que_pide_cada_tipo_y_las_carpetas_de_un_nivel(self):
+        crear = reverse('material_crear', args=[self.clase.pk])
+        self.assertContains(self.client.post(crear, {'tipo': 'archivo', 'titulo': 'X'}), 'Seleccione el archivo')
+        self.assertContains(self.client.post(crear, {'tipo': 'enlace', 'titulo': 'X'}), 'Ingrese la dirección')
+        self.assertContains(self.subir(nombre='virus.exe'), 'extensión')
+
+        carpeta = Material.objects.create(clase=self.clase, subido_por=self.profesor, titulo='C', tipo='carpeta')
+        respuesta = self.client.post(reverse('material_crear_en_carpeta', args=[carpeta.pk]),
+                                     {'tipo': 'carpeta', 'titulo': 'Subcarpeta'})
+        self.assertContains(respuesta, '"modalMaterial"')
+        self.assertEqual(self.clase.materiales.count(), 1)
+
+    def test_rechaza_archivos_de_mas_de_20_mb(self):
+        with mock.patch('cursos.forms.TAMANO_MAXIMO_MB', 0.001):
+            self.assertContains(self.subir(contenido=b'x' * 2048), 'pesa más de')
+        self.assertFalse(self.clase.materiales.exists())
+
+    def test_reemplazar_el_archivo_borra_el_anterior_y_eliminar_borra_el_actual(self):
+        self.subir()
+        material = self.clase.materiales.get()
+        ruta_anterior = material.archivo.path
+
+        self.client.post(reverse('material_editar', args=[material.pk]),
+                         {'titulo': 'Guía 1 corregida', 'archivo': SimpleUploadedFile('guia_v2.pdf', b'v2')})
+        material.refresh_from_db()
+        self.assertEqual((material.titulo, material.nombre_archivo, material.tipo),
+                         ('Guía 1 corregida', 'guia_v2.pdf', 'archivo'))
+        self.assertFalse(os.path.exists(ruta_anterior))
+
+        ruta_actual = material.archivo.path
+        self.client.post(reverse('material_eliminar', args=[material.pk]))
+        self.assertFalse(Material.objects.exists())
+        self.assertFalse(os.path.exists(ruta_actual))
+
+    def test_editar_sin_subir_otro_archivo_conserva_el_actual(self):
+        self.subir()
+        material = self.clase.materiales.get()
+
+        self.client.post(reverse('material_editar', args=[material.pk]), {'titulo': 'Nuevo título'})
+
+        material.refresh_from_db()
+        self.assertEqual((material.titulo, material.nombre_archivo), ('Nuevo título', 'guia.pdf'))
+
+    def test_una_carpeta_con_contenido_y_una_clase_con_material_no_se_eliminan(self):
+        carpeta = Material.objects.create(clase=self.clase, subido_por=self.profesor, titulo='C', tipo='carpeta')
+        Material.objects.create(clase=self.clase, carpeta=carpeta, subido_por=self.profesor, titulo='E',
+                                tipo='enlace', url='https://ejemplo.cl')
+
+        self.client.post(reverse('material_eliminar', args=[carpeta.pk]))
+        self.client.post(reverse('clase_eliminar', args=[self.clase.pk]))
+
+        self.assertEqual(Material.objects.count(), 2)
+        self.assertTrue(Clase.objects.filter(pk=self.clase.pk).exists())
+
+    def test_el_alumno_inscrito_descarga_solo_el_material_visible(self):
+        self.subir()
+        material = self.clase.materiales.get()
+        descargar = reverse('material_descargar', args=[material.pk])
+        self.client.force_login(self.alumno)
+        self.assertEqual(self.client.get(descargar).status_code, 200)
+
+        self.client.force_login(self.profesor)
+        self.client.post(reverse('material_visibilidad', args=[material.pk]))
+        self.client.force_login(self.alumno)
+        self.assertEqual(self.client.get(descargar).status_code, 404)
+
+    def test_un_archivo_dentro_de_una_carpeta_oculta_tampoco_se_descarga(self):
+        carpeta = Material.objects.create(clase=self.clase, subido_por=self.profesor, titulo='C', tipo='carpeta',
+                                          visible=False)
+        self.subir(url=reverse('material_crear_en_carpeta', args=[carpeta.pk]))
+        self.client.force_login(self.alumno)
+
+        self.assertEqual(self.client.get(reverse('material_descargar', args=[carpeta.contenido.get().pk])).status_code,
+                         404)
+
+    def test_quien_no_es_del_curso_no_descarga_ni_modifica(self):
+        self.subir()
+        material = self.clase.materiales.get()
+        otro_alumno = crear_usuario('luis@ejemplo.cl', '22222222-2', 'Luis', Rol.ALUMNO)
+        otro_profesor = crear_usuario('marta@ejemplo.cl', '44444444-4', 'Marta', Rol.PROFESOR)
+
+        for usuario in [otro_alumno, otro_profesor]:
+            self.client.force_login(usuario)
+            with self.subTest(rol=usuario.rol):
+                self.assertEqual(self.client.get(reverse('material_descargar', args=[material.pk])).status_code, 404)
+        self.assertEqual(self.client.post(reverse('material_eliminar', args=[material.pk])).status_code, 404)
+        self.client.logout()
+        self.assertEqual(self.client.get(reverse('material_descargar', args=[material.pk])).status_code, 302)
+        self.assertTrue(Material.objects.exists())
 
 
 class AsignaturasDelProfesorTests(TestCase):

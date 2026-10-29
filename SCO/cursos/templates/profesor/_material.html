@@ -1,0 +1,45 @@
+{# Un elemento de material: archivo, enlace o carpeta, con sus acciones #}
+<div class="d-flex flex-wrap gap-2 justify-content-between align-items-center py-1{% if not material.visible %} opacity-75{% endif %}">
+    <div class="text-break">
+        {% if material.tipo == 'carpeta' %}
+            <i class="bi bi-folder-fill text-warning me-1"></i><span class="fw-semibold">{{ material.titulo }}</span>
+        {% elif material.tipo == 'archivo' %}
+            <i class="bi bi-file-earmark-arrow-down text-primary me-1"></i>
+            <a href="{% url 'material_descargar' material.pk %}">{{ material.titulo }}</a>
+            <span class="small text-muted">({{ material.nombre_archivo }})</span>
+        {% else %}
+            <i class="bi bi-link-45deg text-success me-1"></i>
+            <a href="{{ material.url }}" target="_blank" rel="noopener noreferrer">{{ material.titulo }}</a>
+        {% endif %}
+        {% if not material.visible %}<span class="badge text-bg-secondary ms-1">Oculto para los alumnos</span>{% endif %}
+    </div>
+    <div class="d-flex gap-1">
+        {% if material.tipo == 'carpeta' %}
+            <button type="button" class="btn btn-sm btn-outline-primary abre-modal" title="Agregar a la carpeta"
+                    data-modal="modalMaterial" data-accion="{% url 'material_crear_en_carpeta' material.pk %}"
+                    data-titulo-modal="Agregar a la carpeta «{{ material.titulo }}»" data-tipo="archivo"
+                    data-en-carpeta="1" data-confirmar="¿Está seguro de agregar este material a la carpeta?">
+                <i class="bi bi-plus-lg"></i>
+            </button>
+        {% endif %}
+        <form method="post" action="{% url 'material_visibilidad' material.pk %}" class="m-0">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-sm btn-outline-secondary"
+                    title="{% if material.visible %}Ocultar a los alumnos{% else %}Mostrar a los alumnos{% endif %}">
+                <i class="bi {% if material.visible %}bi-eye-slash{% else %}bi-eye{% endif %}"></i>
+            </button>
+        </form>
+        <button type="button" class="btn btn-sm btn-outline-primary abre-modal" title="Editar"
+                data-modal="modalMaterial" data-accion="{% url 'material_editar' material.pk %}"
+                data-titulo-modal="Editar material" data-confirmar="¿Está seguro de guardar los cambios de este material?"
+                data-editando="1" data-tipo="{{ material.tipo }}" data-titulo="{{ material.titulo }}"
+                data-url="{{ material.url|default:'' }}" data-archivo-actual="{{ material.nombre_archivo }}">
+            <i class="bi bi-pencil"></i>
+        </button>
+        <form method="post" action="{% url 'material_eliminar' material.pk %}" class="m-0"
+              data-confirmar="¿Está seguro de eliminar «{{ material.titulo }}»?{% if material.tipo == 'archivo' %} El archivo se borrará del servidor.{% endif %}">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-sm btn-outline-danger" title="Eliminar"><i class="bi bi-trash"></i></button>
+        </form>
+    </div>
+</div>

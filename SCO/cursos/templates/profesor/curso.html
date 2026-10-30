@@ -27,8 +27,16 @@
         </button>
     </li>
     {# Secciones de los pasos siguientes de la fase 3 #}
-    <li class="nav-item"><span class="nav-link disabled">Actividades <small>(próximamente)</small></span></li>
-    <li class="nav-item"><span class="nav-link disabled">Calificaciones <small>(próximamente)</small></span></li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#actividades" type="button" role="tab">
+            <i class="bi bi-clipboard-check me-1"></i>Actividades <span class="badge text-bg-secondary">{{ actividades|length }}</span>
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#calificaciones" type="button" role="tab">
+            <i class="bi bi-123 me-1"></i>Calificaciones
+        </button>
+    </li>
     <li class="nav-item" role="presentation">
         <button class="nav-link" data-bs-toggle="tab" data-bs-target="#asistencia" type="button" role="tab">
             <i class="bi bi-person-check me-1"></i>Asistencia
@@ -156,6 +164,146 @@
                 </div>
             </div>
         {% endfor %}
+    </div>
+
+    {# ---------- Actividades (RF-11) ---------- #}
+    <div class="tab-pane fade" id="actividades" role="tabpanel">
+        <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
+            <div class="flex-grow-1" style="max-width: 420px;">
+                <div class="small text-muted mb-1">
+                    Ponderación asignada: <strong>{{ ponderacion_asignada|floatformat:"-2" }} %</strong> de 100 %
+                </div>
+                <div class="progress" role="progressbar" aria-label="Ponderación asignada"
+                     aria-valuenow="{{ ponderacion_asignada|floatformat:0 }}" aria-valuemin="0" aria-valuemax="100">
+                    <div class="progress-bar {% if ponderacion_asignada == 100 %}bg-success{% endif %}"
+                         style="width: {{ ponderacion_asignada|floatformat:0 }}%"></div>
+                </div>
+            </div>
+            <button type="button" class="btn btn-primary abre-modal" data-modal="modalActividad"
+                    data-accion="{% url 'actividad_crear' curso.pk %}" data-titulo-modal="Crear actividad"
+                    data-confirmar="¿Está seguro de crear esta actividad?" data-tipo="archivo"
+                    {% if not clases %}disabled title="Primero agregue clases al curso"{% endif %}>
+                <i class="bi bi-plus-lg me-1"></i>Crear actividad
+            </button>
+        </div>
+
+        {% if actividades %}
+            <div class="card shadow-sm border-0">
+                <div class="table-responsive">
+                    <table class="table align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Actividad</th>
+                                <th class="text-center">Ponderación</th>
+                                <th class="d-none d-md-table-cell">Fecha límite</th>
+                                <th class="text-center">Calificadas</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for actividad in actividades %}
+                                <tr{% if not actividad.visible %} class="text-muted"{% endif %}>
+                                    <td>
+                                        <div class="fw-semibold">{{ actividad.titulo }}</div>
+                                        <div class="small text-muted">
+                                            {{ actividad.get_tipo_display }} · {{ actividad.clase.titulo }}
+                                            {% if not actividad.visible %}<span class="badge text-bg-secondary">Oculta</span>{% endif %}
+                                        </div>
+                                    </td>
+                                    <td class="text-center">{{ actividad.ponderacion|floatformat:"-2" }} %</td>
+                                    <td class="d-none d-md-table-cell text-nowrap">{{ actividad.fecha_limite|date:"d/m/Y H:i" }}</td>
+                                    <td class="text-center">{{ actividad.calificadas }}/{{ inscripciones|length }}</td>
+                                    <td>
+                                        <div class="d-flex flex-wrap justify-content-end gap-1">
+                                            <a href="{% url 'actividad_calificar' actividad.pk %}" class="btn btn-sm btn-success">
+                                                <i class="bi bi-pencil-square me-1"></i>Calificar
+                                            </a>
+                                            <form method="post" action="{% url 'actividad_visibilidad' actividad.pk %}" class="m-0">
+                                                {% csrf_token %}
+                                                <button type="submit" class="btn btn-sm btn-outline-secondary"
+                                                        title="{% if actividad.visible %}Ocultar a los alumnos{% else %}Mostrar a los alumnos{% endif %}">
+                                                    <i class="bi {% if actividad.visible %}bi-eye-slash{% else %}bi-eye{% endif %}"></i>
+                                                </button>
+                                            </form>
+                                            <button type="button" class="btn btn-sm btn-outline-primary abre-modal" title="Editar"
+                                                    data-modal="modalActividad" data-accion="{% url 'actividad_editar' actividad.pk %}"
+                                                    data-titulo-modal="Editar actividad"
+                                                    data-confirmar="¿Está seguro de guardar los cambios de esta actividad?"
+                                                    data-clase="{{ actividad.clase_id }}" data-titulo="{{ actividad.titulo }}"
+                                                    data-tipo="{{ actividad.tipo }}" data-ponderacion="{{ actividad.ponderacion|stringformat:'s' }}"
+                                                    data-fecha_limite="{{ actividad.fecha_limite|date:'Y-m-d\TH:i' }}"
+                                                    data-descripcion="{{ actividad.descripcion }}">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+                                            <form method="post" action="{% url 'actividad_eliminar' actividad.pk %}" class="m-0"
+                                                  data-confirmar="¿Está seguro de eliminar la actividad «{{ actividad.titulo }}»?">
+                                                {% csrf_token %}
+                                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Eliminar"><i class="bi bi-trash"></i></button>
+                                            </form>
+                                        </div>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        {% else %}
+            <div class="card shadow-sm border-0">
+                <div class="card-body text-center text-muted py-5">
+                    {% if clases %}Aún no hay actividades. Crea la primera con su ponderación.{% else %}Agrega clases en la pestaña Contenido para poder crear actividades.{% endif %}
+                </div>
+            </div>
+        {% endif %}
+    </div>
+
+    {# ---------- Planilla de notas y promedio ponderado (RF-11) ---------- #}
+    <div class="tab-pane fade" id="calificaciones" role="tabpanel">
+        <div class="card shadow-sm border-0">
+            <div class="card-body">
+                {% if actividades and filas_notas %}
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered align-middle text-center mb-2">
+                            <thead class="table-light">
+                                <tr>
+                                    <th class="text-start">Alumno</th>
+                                    {% for actividad in actividades %}
+                                        <th title="{{ actividad.titulo }}">
+                                            <a href="{% url 'actividad_calificar' actividad.pk %}" class="text-reset">{{ actividad.titulo|truncatechars:18 }}</a>
+                                            <div class="small fw-normal text-muted">{{ actividad.ponderacion|floatformat:"-2" }} %</div>
+                                        </th>
+                                    {% endfor %}
+                                    <th>Promedio</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for fila in filas_notas %}
+                                    <tr>
+                                        <td class="text-start text-nowrap">{{ fila.inscripcion.alumno.get_full_name }}</td>
+                                        {% for nota in fila.notas %}
+                                            <td class="{% if nota is not None and nota < 4 %}text-danger{% endif %}">{{ nota|default_if_none:"–" }}</td>
+                                        {% endfor %}
+                                        <td class="fw-bold {% if fila.promedio is not None and fila.promedio < 4 %}text-danger{% endif %}">
+                                            {% if fila.promedio is None %}–{% else %}{{ fila.promedio }}
+                                                {% if fila.evaluado < 100 %}<div class="small fw-normal text-muted">parcial ({{ fila.evaluado|floatformat:"-2" }} %)</div>{% endif %}
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="small text-muted mb-0">
+                        El promedio pondera cada nota por el porcentaje de su actividad. Mientras no esté evaluado el 100 %
+                        del curso, se muestra como parcial y se calcula solo sobre lo evaluado. Las notas bajo 4,0 aparecen en rojo.
+                    </p>
+                {% elif not actividades %}
+                    <p class="text-muted text-center py-4 mb-0">Crea actividades en la pestaña Actividades para registrar notas.</p>
+                {% else %}
+                    <p class="text-muted text-center py-4 mb-0">Aún no hay alumnos inscritos.</p>
+                {% endif %}
+            </div>
+        </div>
     </div>
 
     {# ---------- Asistencia (RF-12) ---------- #}
@@ -329,6 +477,32 @@
         </div>
     </div>
 </div>
+
+<div class="modal fade" id="modalActividad" tabindex="-1" aria-labelledby="tituloModalActividad" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="tituloModalActividad">{% if modal_abierto.id == 'modalActividad' %}{{ modal_abierto.titulo }}{% endif %}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <form method="post" id="formActividad" novalidate
+                      {% if modal_abierto.id == 'modalActividad' %}action="{{ modal_abierto.accion }}"{% endif %}
+                      data-confirmar="¿Está seguro de guardar esta actividad?">
+                    {% csrf_token %}
+                    {% include 'administrador/_campos_formulario.html' with form=form_actividad %}
+                </form>
+                <p class="small text-muted mt-3 mb-0">
+                    <i class="bi bi-info-circle me-1"></i>Las actividades del curso suman hoy {{ ponderacion_asignada|floatformat:"-2" }} %; en total no pueden pasar de 100 %.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" form="formActividad" class="btn btn-primary">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -372,7 +546,7 @@
                 form.dataset.confirmar = boton.dataset.confirmar;
                 form.querySelectorAll('.alert, .invalid-feedback').forEach((error) => error.remove());
                 form.querySelectorAll('.is-invalid').forEach((campo) => campo.classList.remove('is-invalid'));
-                form.querySelectorAll('input[name]:not([type=hidden]), select[name]').forEach((campo) => {
+                form.querySelectorAll('input[name]:not([type=hidden]), select[name], textarea[name]').forEach((campo) => {
                     campo.value = boton.dataset[campo.name] || '';
                 });
                 if (form === formMaterial) prepararMaterial(boton);

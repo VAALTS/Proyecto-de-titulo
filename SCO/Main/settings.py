@@ -39,6 +39,7 @@ ALLOWED_HOSTS = [host for host in os.environ.get('ALLOWED_HOSTS', '').split(',')
 INSTALLED_APPS = [
     'usuarios',
     'cursos',
+    'evaluaciones',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',

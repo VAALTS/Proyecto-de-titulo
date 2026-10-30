@@ -9,6 +9,8 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
+from evaluaciones.calculos import resumen_del_curso
+from evaluaciones.forms import ActividadForm
 from usuarios.models import Rol
 from usuarios.views import profesor_required
 
@@ -21,7 +23,7 @@ SECCIONES_PROFESOR = [
     {'titulo': 'Cursos', 'descripcion': 'Revisa tus cursos, su material, sus alumnos y pasa asistencia.',
      'icono': 'bi-journal-bookmark-fill', 'color': 'primary', 'url': 'profesor_cursos'},
     {'titulo': 'Gestión de Evaluaciones', 'descripcion': 'Crea actividades y registra las calificaciones.',
-     'icono': 'bi-clipboard-check-fill', 'color': 'success', 'url': None},
+     'icono': 'bi-clipboard-check-fill', 'color': 'success', 'url': 'profesor_evaluaciones'},
     {'titulo': 'Horario', 'descripcion': 'Consulta tu calendario semanal de clases.',
      'icono': 'bi-calendar-week-fill', 'color': 'warning', 'url': None},
     {'titulo': 'Asistencia por clase', 'descripcion': 'Consulta el historial de asistencia de cada clase.',
@@ -81,9 +83,10 @@ def profesor_cursos_view(request):
 
 # Cada modal de la página y su formulario vacío
 FORMULARIOS_CURSO = {
-    'modalModulo': ('form_modulo', lambda: ModuloForm(auto_id='modulo_%s')),
-    'modalClase': ('form_clase', lambda: ClaseForm(auto_id='clase_%s')),
-    'modalMaterial': ('form_material', lambda: MaterialForm(auto_id='material_%s')),
+    'modalModulo': ('form_modulo', lambda curso: ModuloForm(auto_id='modulo_%s')),
+    'modalClase': ('form_clase', lambda curso: ClaseForm(auto_id='clase_%s')),
+    'modalMaterial': ('form_material', lambda curso: MaterialForm(auto_id='material_%s')),
+    'modalActividad': ('form_actividad', lambda curso: ActividadForm(curso, auto_id='actividad_%s')),
 }
 
 
@@ -116,9 +119,11 @@ def pagina_curso(request, curso, form=None, id_modal='', titulo_modal=''):
             clases_registradas=Count('asistencias'),
             clases_presente=Count('asistencias', filter=Q(asistencias__presente=True))),
         'modal_abierto': {'id': id_modal, 'accion': request.path, 'titulo': titulo_modal} if form else None,
+        # Actividades y planilla de notas (RF-11)
+        **resumen_del_curso(curso, inscripciones),
     }
     for modal, (nombre, vacio) in FORMULARIOS_CURSO.items():
-        contexto[nombre] = form if modal == id_modal else vacio()
+        contexto[nombre] = form if modal == id_modal else vacio(curso)
     return render(request, 'profesor/curso.html', contexto)
 
 
@@ -214,7 +219,7 @@ def clase_eliminar_view(request, pk):
     try:
         clase.delete()
     except ProtectedError:
-        messages.error(request, f'La clase «{clase.titulo}» ya tiene asistencia, material o calificaciones '
+        messages.error(request, f'La clase «{clase.titulo}» ya tiene asistencia, material o actividades '
                                 f'registradas, así que no se puede eliminar.')
     else:
         messages.success(request, f'Se eliminó la clase «{clase.titulo}».')

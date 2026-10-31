@@ -1,3 +1,4 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -8,7 +9,7 @@
     <style>
         body {
             min-height: 100vh;
-            background: linear-gradient(135deg, #ec2020, #fa9715);
+            background: linear-gradient(135deg,#2e6cc1, #c8232a, #f65b47, #e9cf22);
         }
         .login-card {
             width: 100%;
@@ -16,18 +17,16 @@
             border: none;
             border-radius: 1rem;
         }
-        .brand {
-            font-weight: 700;
-            color: #2a5298;
-        }
     </style>
 </head>
 <body class="d-flex align-items-center justify-content-center px-3">
 
     <div class="card login-card shadow-lg p-4">
         <div class="text-center mb-4">
-            <h3 class="brand">Adapt Academy</h3>
-            <p class="text-muted mb-0">Ingresa con tu cuenta</p>
+            <h3 class="text-center mb-4">
+                <img src="{% static 'images/logo_adapt.jpg' %}" class="img-fluid" alt="LogoAdapt">
+            </h3>
+            <p class="text-muted mb-0">Ingresa con tus credenciales</p>
         </div>
 
         {% for error in form.non_field_errors %}
@@ -53,7 +52,7 @@
                        placeholder="Tu contraseña" autocomplete="current-password" required>
             </div>
 
-            <button type="submit" class="btn btn-primary w-100">Ingresar</button>
+            <button type="submit" class="btn btn-secondary w-100">Ingresar</button>
         </form>
     </div>
 

@@ -1,12 +1,24 @@
 from django.contrib import admin
 
-from .models import Actividad, Calificacion
+from .models import Actividad, Alternativa, Calificacion, Pregunta
 
 
 @admin.register(Actividad)
 class ActividadAdmin(admin.ModelAdmin):
     list_display = ('titulo', 'clase', 'tipo', 'ponderacion', 'fecha_limite', 'visible')
     list_filter = ('tipo', 'visible', 'clase__modulo__curso')
+
+
+class AlternativaInline(admin.TabularInline):
+    model = Alternativa
+    extra = 0
+
+
+@admin.register(Pregunta)
+class PreguntaAdmin(admin.ModelAdmin):
+    list_display = ('enunciado', 'actividad', 'tipo', 'puntaje', 'orden')
+    list_filter = ('tipo',)
+    inlines = [AlternativaInline]
 
 
 @admin.register(Calificacion)

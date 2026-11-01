@@ -45,6 +45,55 @@ class Actividad(models.Model):
         return self.clase.modulo.curso
 
 
+class Pregunta(models.Model):
+    """Pregunta de una actividad de tipo formulario."""
+
+    class Tipo(models.TextChoices):
+        ALTERNATIVAS = 'alternativas', 'Alternativas'
+        DESARROLLO = 'desarrollo', 'Desarrollo'
+
+    actividad = models.ForeignKey(Actividad, on_delete=models.CASCADE, related_name='preguntas')
+    enunciado = models.TextField()
+    tipo = models.CharField(max_length=12, choices=Tipo.choices, default=Tipo.ALTERNATIVAS)
+    puntaje = models.DecimalField(max_digits=4, decimal_places=1, default=Decimal('1.0'),
+                                  validators=[MinValueValidator(Decimal('0.1'))])
+    orden = models.PositiveSmallIntegerField(default=1)
+
+    class Meta:
+        verbose_name = 'pregunta'
+        verbose_name_plural = 'preguntas'
+        ordering = ['orden', 'pk']
+        constraints = [
+            models.CheckConstraint(condition=models.Q(puntaje__gt=0), name='pregunta_puntaje_positivo'),
+        ]
+
+    def __str__(self):
+        return self.enunciado[:60]
+
+    def save(self, *args, **kwargs):
+        # Una pregunta nueva queda al final del formulario
+        if not self.pk:
+            ultima = self.actividad.preguntas.aggregate(models.Max('orden'))['orden__max'] or 0
+            self.orden = ultima + 1
+        super().save(*args, **kwargs)
+
+
+class Alternativa(models.Model):
+    """Opción de una pregunta de alternativas."""
+
+    pregunta = models.ForeignKey(Pregunta, on_delete=models.CASCADE, related_name='alternativas')
+    texto = models.CharField(max_length=300)
+    es_correcta = models.BooleanField(default=False)
+
+    class Meta:
+        verbose_name = 'alternativa'
+        verbose_name_plural = 'alternativas'
+        ordering = ['pk']
+
+    def __str__(self):
+        return self.texto
+
+
 class Calificacion(models.Model):
     """Nota de un alumno en una actividad, en escala de 1,0 a 7,0 (RF-11).
 

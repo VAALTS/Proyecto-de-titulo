@@ -1,14 +1,16 @@
 """Actividades y calificaciones del profesor (RF-11)."""
 from django.contrib import messages
-from django.db.models import Count, ProtectedError, Q
-from django.shortcuts import get_object_or_404, render
+from django.db import transaction
+from django.db.models import Count, ProtectedError, Q, Sum
+from django.http import Http404
+from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from cursos.views_profesor import curso_propio, cursos_del_profesor, pagina_curso, volver_al_curso
 from usuarios.views import profesor_required
 
-from .forms import ActividadForm, CalificacionesForm, porcentaje
-from .models import Actividad
+from .forms import ActividadForm, CalificacionesForm, PreguntaForm, porcentaje
+from .models import Actividad, Pregunta
 
 
 def actividad_propia(request, pk):
@@ -103,3 +105,97 @@ def profesor_evaluaciones_view(request):
     return render(request, 'evaluaciones/evaluaciones.html', {
         'cursos': cursos, 'actividades': actividades, 'curso_elegido': curso_elegido,
     })
+
+
+# ---------- Formularios en línea: preguntas de una actividad ----------
+
+def formulario_propio(request, pk):
+    actividad = actividad_propia(request, pk)
+    if actividad.tipo != Actividad.Tipo.FORMULARIO:
+        raise Http404
+    return actividad
+
+
+def pregunta_propia(request, pk):
+    pregunta = get_object_or_404(Pregunta.objects.select_related('actividad__clase__modulo__curso'), pk=pk,
+                                 actividad__clase__modulo__curso__profesor=request.user,
+                                 actividad__clase__modulo__curso__activo=True,
+                                 actividad__tipo=Actividad.Tipo.FORMULARIO)
+    return pregunta
+
+
+def pagina_formulario(request, actividad, form=None, titulo_modal=''):
+    """Si la pregunta vuelve con errores, se reabre su modal apuntando a la misma dirección."""
+    preguntas = list(actividad.preguntas.prefetch_related('alternativas'))
+    return render(request, 'evaluaciones/formulario.html', {
+        'actividad': actividad,
+        'curso': actividad.curso,
+        'preguntas': preguntas,
+        'puntaje_total': actividad.preguntas.aggregate(total=Sum('puntaje'))['total'] or 0,
+        'form': form or PreguntaForm(auto_id='pregunta_%s'),
+        # Datos para cargar el modal al editar cada pregunta
+        'datos_preguntas': {
+            str(pregunta.pk): {
+                'enunciado': pregunta.enunciado, 'tipo': pregunta.tipo, 'puntaje': str(pregunta.puntaje),
+                'alternativas': [{'texto': a.texto, 'correcta': a.es_correcta} for a in pregunta.alternativas.all()],
+            } for pregunta in preguntas
+        },
+        'modal_abierto': {'accion': request.path, 'titulo': titulo_modal,
+                          'alternativas': form.filas_enviadas()} if form else None,
+    })
+
+
+@profesor_required
+def actividad_formulario_view(request, pk):
+    return pagina_formulario(request, formulario_propio(request, pk))
+
+
+@profesor_required
+@require_POST
+def pregunta_crear_view(request, pk):
+    actividad = formulario_propio(request, pk)
+    form = PreguntaForm(request.POST, instance=Pregunta(actividad=actividad), auto_id='pregunta_%s')
+    if not form.is_valid():
+        return pagina_formulario(request, actividad, form, 'Agregar pregunta')
+    form.save()
+    messages.success(request, 'Se agregó la pregunta.')
+    return redirect('actividad_formulario', pk=actividad.pk)
+
+
+@profesor_required
+@require_POST
+def pregunta_editar_view(request, pk):
+    pregunta = pregunta_propia(request, pk)
+    form = PreguntaForm(request.POST, instance=pregunta, auto_id='pregunta_%s')
+    if not form.is_valid():
+        return pagina_formulario(request, Actividad.objects.get(pk=pregunta.actividad_id), form, 'Editar pregunta')
+    form.save()
+    messages.success(request, 'Se guardaron los cambios de la pregunta.')
+    return redirect('actividad_formulario', pk=pregunta.actividad_id)
+
+
+@profesor_required
+@require_POST
+def pregunta_eliminar_view(request, pk):
+    pregunta = pregunta_propia(request, pk)
+    pregunta.delete()
+    messages.success(request, 'Se eliminó la pregunta.')
+    return redirect('actividad_formulario', pk=pregunta.actividad_id)
+
+
+@profesor_required
+@require_POST
+def pregunta_mover_view(request, pk, direccion):
+    """Intercambia la posición de la pregunta con la anterior o la siguiente."""
+    if direccion not in ('subir', 'bajar'):
+        raise Http404
+    pregunta = pregunta_propia(request, pk)
+    hermanas = pregunta.actividad.preguntas.all()
+    vecina = (hermanas.filter(orden__lt=pregunta.orden).order_by('-orden').first() if direccion == 'subir'
+              else hermanas.filter(orden__gt=pregunta.orden).order_by('orden').first())
+    if vecina:
+        with transaction.atomic():
+            pregunta.orden, vecina.orden = vecina.orden, pregunta.orden
+            pregunta.save(update_fields=['orden'])
+            vecina.save(update_fields=['orden'])
+    return redirect('actividad_formulario', pk=pregunta.actividad_id)

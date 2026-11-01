@@ -215,6 +215,11 @@
                                     <td class="text-center">{{ actividad.calificadas }}/{{ inscripciones|length }}</td>
                                     <td>
                                         <div class="d-flex flex-wrap justify-content-end gap-1">
+                                            {% if actividad.tipo == 'formulario' %}
+                                                <a href="{% url 'actividad_formulario' actividad.pk %}" class="btn btn-sm btn-outline-primary">
+                                                    <i class="bi bi-list-check me-1"></i>Preguntas ({{ actividad.cantidad_preguntas }})
+                                                </a>
+                                            {% endif %}
                                             <a href="{% url 'actividad_calificar' actividad.pk %}" class="btn btn-sm btn-success">
                                                 <i class="bi bi-pencil-square me-1"></i>Calificar
                                             </a>

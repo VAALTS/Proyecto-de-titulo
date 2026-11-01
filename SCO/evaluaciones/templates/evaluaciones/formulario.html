@@ -1,0 +1,181 @@
+{% extends 'base.html' %}
+
+{# Constructor del formulario en línea de una actividad (RF-11) #}
+
+{% block title %}Formulario: {{ actividad.titulo }}{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
+    <div>
+        <h2 class="fw-bold mb-1"><i class="bi bi-list-check text-primary me-2"></i>{{ actividad.titulo }}</h2>
+        <p class="text-muted mb-0">
+            {{ curso.nombre }} · {{ actividad.clase.titulo }} · Fecha límite {{ actividad.fecha_limite|date:"d/m/Y H:i" }}<br>
+            {{ preguntas|length }} pregunta{{ preguntas|length|pluralize }} · Puntaje total: <strong>{{ puntaje_total }}</strong>
+        </p>
+    </div>
+    <div class="d-flex gap-2">
+        <a href="{% url 'profesor_curso' curso.pk %}#actividades" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left me-1"></i>Volver al curso
+        </a>
+        <button type="button" class="btn btn-primary abre-pregunta" data-accion="{% url 'pregunta_crear' actividad.pk %}"
+                data-titulo-modal="Agregar pregunta" data-confirmar="¿Está seguro de agregar esta pregunta?">
+            <i class="bi bi-plus-lg me-1"></i>Agregar pregunta
+        </button>
+    </div>
+</div>
+
+{% for pregunta in preguntas %}
+    <div class="card shadow-sm border-0 mb-3">
+        <div class="card-body">
+            <div class="d-flex flex-wrap gap-2 justify-content-between align-items-start">
+                <div class="flex-grow-1">
+                    <span class="badge text-bg-primary me-1">{{ forloop.counter }}</span>
+                    <span class="badge text-bg-secondary me-1">{{ pregunta.get_tipo_display }}</span>
+                    <span class="small text-muted">{{ pregunta.puntaje }} punto{{ pregunta.puntaje|pluralize }}</span>
+                    <p class="mt-2 mb-2">{{ pregunta.enunciado|linebreaksbr }}</p>
+                </div>
+                <div class="d-flex flex-wrap gap-1">
+                    <form method="post" action="{% url 'pregunta_mover' pregunta.pk 'subir' %}" class="m-0">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-outline-secondary" title="Subir pregunta"
+                                {% if forloop.first %}disabled{% endif %}><i class="bi bi-arrow-up"></i></button>
+                    </form>
+                    <form method="post" action="{% url 'pregunta_mover' pregunta.pk 'bajar' %}" class="m-0">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-outline-secondary" title="Bajar pregunta"
+                                {% if forloop.last %}disabled{% endif %}><i class="bi bi-arrow-down"></i></button>
+                    </form>
+                    <button type="button" class="btn btn-sm btn-outline-primary abre-pregunta" title="Editar pregunta"
+                            data-pregunta="{{ pregunta.pk }}" data-accion="{% url 'pregunta_editar' pregunta.pk %}"
+                            data-titulo-modal="Editar pregunta"
+                            data-confirmar="¿Está seguro de guardar los cambios de esta pregunta?">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <form method="post" action="{% url 'pregunta_eliminar' pregunta.pk %}" class="m-0"
+                          data-confirmar="¿Está seguro de eliminar esta pregunta?">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Eliminar pregunta"><i class="bi bi-trash"></i></button>
+                    </form>
+                </div>
+            </div>
+            {% if pregunta.tipo == 'alternativas' %}
+                <ul class="list-unstyled mb-0">
+                    {% for alternativa in pregunta.alternativas.all %}
+                        <li class="{% if alternativa.es_correcta %}text-success fw-semibold{% endif %}">
+                            <i class="bi {% if alternativa.es_correcta %}bi-check-circle-fill{% else %}bi-circle{% endif %} me-1"></i>{{ alternativa.texto }}
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="small text-muted mb-0">El alumno responde por escrito y usted corrige la respuesta.</p>
+            {% endif %}
+        </div>
+    </div>
+{% empty %}
+    <div class="card shadow-sm border-0">
+        <div class="card-body text-center text-muted py-5">Este formulario aún no tiene preguntas.</div>
+    </div>
+{% endfor %}
+
+{# Modal compartido para agregar y editar preguntas #}
+<div class="modal fade" id="modalPregunta" tabindex="-1" aria-labelledby="tituloModalPregunta" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="tituloModalPregunta">{{ modal_abierto.titulo }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <form method="post" id="formPregunta" novalidate
+                      {% if modal_abierto %}action="{{ modal_abierto.accion }}"{% endif %}
+                      data-confirmar="¿Está seguro de guardar esta pregunta?">
+                    {% csrf_token %}
+                    {% include 'administrador/_campos_formulario.html' with form=form %}
+
+                    <div class="mt-3" id="seccionAlternativas">
+                        <label class="form-label">Alternativas <span class="text-danger">*</span></label>
+                        <div class="form-text mb-2">Marque la alternativa correcta. Las filas vacías no se guardan.</div>
+                        <div id="filasAlternativas"></div>
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="agregarAlternativa">
+                            <i class="bi bi-plus-lg me-1"></i>Agregar alternativa
+                        </button>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" form="formPregunta" class="btn btn-primary">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ datos_preguntas|json_script:"datos-preguntas" }}
+{{ modal_abierto|json_script:"modal-abierto" }}
+<script>
+    (() => {
+        const datos = JSON.parse(document.getElementById('datos-preguntas').textContent);
+        const abierto = JSON.parse(document.getElementById('modal-abierto').textContent);
+        const modal = document.getElementById('modalPregunta');
+        const form = document.getElementById('formPregunta');
+        const tipo = document.getElementById('pregunta_tipo');
+        const filas = document.getElementById('filasAlternativas');
+
+        function numerarFilas() {
+            // `correcta` guarda la posición de la fila marcada
+            filas.querySelectorAll('input[type=radio]').forEach((radio, posicion) => { radio.value = posicion; });
+        }
+
+        function agregarFila(texto = '', correcta = false) {
+            const fila = document.createElement('div');
+            fila.className = 'input-group mb-2';
+            fila.innerHTML = `
+                <div class="input-group-text"><input class="form-check-input mt-0" type="radio" name="correcta" aria-label="Alternativa correcta"></div>
+                <input type="text" class="form-control" name="alternativa" maxlength="300" aria-label="Texto de la alternativa">
+                <button type="button" class="btn btn-outline-danger" title="Quitar alternativa"><i class="bi bi-x-lg"></i></button>`;
+            fila.querySelector('input[name=alternativa]').value = texto;
+            fila.querySelector('input[type=radio]').checked = correcta;
+            fila.querySelector('button').addEventListener('click', () => { fila.remove(); numerarFilas(); });
+            filas.appendChild(fila);
+            numerarFilas();
+        }
+
+        function cargarAlternativas(alternativas) {
+            filas.innerHTML = '';
+            alternativas.forEach((alternativa) => agregarFila(alternativa.texto, alternativa.correcta));
+            // Toda pregunta nueva parte con dos filas, el mínimo
+            while (filas.children.length < 2) agregarFila();
+        }
+
+        function mostrarAlternativas() {
+            document.getElementById('seccionAlternativas').classList.toggle('d-none', tipo.value !== 'alternativas');
+        }
+
+        document.querySelectorAll('.abre-pregunta').forEach((boton) => {
+            boton.addEventListener('click', () => {
+                const pregunta = datos[boton.dataset.pregunta] || {enunciado: '', tipo: 'alternativas', puntaje: '1.0', alternativas: []};
+                modal.querySelector('.modal-title').textContent = boton.dataset.tituloModal;
+                form.action = boton.dataset.accion;
+                form.dataset.confirmar = boton.dataset.confirmar;
+                form.querySelectorAll('.alert, .invalid-feedback').forEach((error) => error.remove());
+                form.querySelectorAll('.is-invalid').forEach((campo) => campo.classList.remove('is-invalid'));
+                document.getElementById('pregunta_enunciado').value = pregunta.enunciado;
+                document.getElementById('pregunta_puntaje').value = pregunta.puntaje;
+                tipo.value = pregunta.tipo;
+                cargarAlternativas(pregunta.alternativas);
+                mostrarAlternativas();
+                bootstrap.Modal.getOrCreateInstance(modal).show();
+            });
+        });
+        document.getElementById('agregarAlternativa').addEventListener('click', () => agregarFila());
+        tipo.addEventListener('change', mostrarAlternativas);
+
+        // Si el servidor devolvió la pregunta con errores, se reabre el modal con lo escrito
+        cargarAlternativas(abierto ? abierto.alternativas : []);
+        mostrarAlternativas();
+        if (abierto) bootstrap.Modal.getOrCreateInstance(modal).show();
+    })();
+</script>
+{% endblock %}

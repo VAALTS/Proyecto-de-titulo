@@ -24,7 +24,9 @@ def promedio_ponderado(notas_y_ponderaciones):
 def resumen_del_curso(curso, inscripciones):
     """Actividades del curso y la planilla de notas: cada alumno con su nota por actividad y su promedio."""
     actividades = list(Actividad.objects.filter(clase__modulo__curso=curso).select_related('clase')
-                       .annotate(calificadas=Count('calificaciones')).order_by('fecha_limite', 'titulo'))
+                       .annotate(calificadas=Count('calificaciones', distinct=True),
+                                 cantidad_preguntas=Count('preguntas', distinct=True))
+                       .order_by('fecha_limite', 'titulo'))
     notas = {(c.inscripcion_id, c.actividad_id): c.nota
              for c in Calificacion.objects.filter(actividad__in=actividades)}
     filas = []

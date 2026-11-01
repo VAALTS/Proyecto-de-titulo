@@ -10,7 +10,7 @@ from cursos.models import Clase, Curso, Inscripcion, Modulo
 from usuarios.models import Rol, Usuario
 
 from .calculos import promedio_ponderado
-from .models import Actividad, Calificacion
+from .models import Actividad, Alternativa, Calificacion, Pregunta
 
 
 def crear_usuario(email, rut, nombre, rol):
@@ -199,3 +199,120 @@ class CalificacionTests(EvaluacionesTestCase):
                          [('Informe', 1, 2)])
         self.assertContains(respuesta, '1 de 2')
         self.assertContains(self.client.get(reverse('profesor_inicio')), f'href="{reverse("profesor_evaluaciones")}"')
+
+
+class FormularioTests(EvaluacionesTestCase):
+    """Constructor de formularios en línea: preguntas de alternativas y de desarrollo."""
+
+    def setUp(self):
+        super().setUp()
+        self.actividad = Actividad.objects.create(clase=self.clase, titulo='Control', ponderacion=Decimal('20'),
+                                                  tipo=Actividad.Tipo.FORMULARIO,
+                                                  fecha_limite=timezone.now() + timedelta(days=7))
+
+    def crear_pregunta(self, **cambios):
+        datos = {'enunciado': '¿Cuánto es 2 + 2?', 'tipo': 'alternativas', 'puntaje': '2',
+                 'alternativa': ['3', '4', ''], 'correcta': '1', **cambios}
+        return self.client.post(reverse('pregunta_crear', args=[self.actividad.pk]), datos)
+
+    def test_crear_una_pregunta_de_alternativas(self):
+        respuesta = self.crear_pregunta()
+
+        self.assertRedirects(respuesta, reverse('actividad_formulario', args=[self.actividad.pk]),
+                             fetch_redirect_response=False)
+        pregunta = self.actividad.preguntas.get()
+        self.assertEqual(list(pregunta.alternativas.values_list('texto', 'es_correcta')),
+                         [('3', False), ('4', True)])
+
+    def test_la_fila_vacia_no_desplaza_la_alternativa_correcta(self):
+        self.crear_pregunta(alternativa=['', 'Sí', 'No'], correcta='2')
+
+        self.assertEqual(Alternativa.objects.get(es_correcta=True).texto, 'No')
+
+    def test_crear_una_pregunta_de_desarrollo_ignora_las_alternativas(self):
+        self.crear_pregunta(tipo='desarrollo', alternativa=['x', 'y'], correcta='0')
+
+        self.assertFalse(self.actividad.preguntas.get().alternativas.exists())
+
+    def test_las_alternativas_exigen_dos_opciones_y_una_correcta(self):
+        casos = [({'alternativa': ['Sola', ''], 'correcta': '0'}, 'Agregue al menos 2 alternativas'),
+                 ({'alternativa': ['A', 'B'], 'correcta': ''}, 'Marque cuál es la alternativa correcta'),
+                 ({'alternativa': ['A', 'B', ''], 'correcta': '2'}, 'Marque cuál es la alternativa correcta')]
+        for cambios, error in casos:
+            with self.subTest(error=error):
+                respuesta = self.crear_pregunta(**cambios)
+                self.assertContains(respuesta, error)
+                self.assertEqual(respuesta.context['modal_abierto']['titulo'], 'Agregar pregunta')
+        self.assertFalse(self.actividad.preguntas.exists())
+
+    def test_el_enunciado_y_un_puntaje_positivo_son_obligatorios(self):
+        for cambios in [{'enunciado': ''}, {'puntaje': '0'}, {'puntaje': ''}]:
+            with self.subTest(cambios=cambios):
+                self.assertEqual(self.crear_pregunta(**cambios).status_code, 200)
+        self.assertFalse(self.actividad.preguntas.exists())
+
+    def test_editar_reemplaza_las_alternativas(self):
+        self.crear_pregunta()
+        pregunta = self.actividad.preguntas.get()
+
+        self.client.post(reverse('pregunta_editar', args=[pregunta.pk]),
+                         {'enunciado': 'Otra', 'tipo': 'alternativas', 'puntaje': '3',
+                          'alternativa': ['Uno', 'Dos', 'Tres'], 'correcta': '2'})
+
+        pregunta.refresh_from_db()
+        self.assertEqual((pregunta.enunciado, pregunta.puntaje), ('Otra', Decimal('3.0')))
+        self.assertEqual(pregunta.alternativas.get(es_correcta=True).texto, 'Tres')
+        self.assertEqual(pregunta.alternativas.count(), 3)
+
+    def test_las_preguntas_se_ordenan_y_se_eliminan(self):
+        for enunciado in ['Uno', 'Dos']:
+            self.crear_pregunta(enunciado=enunciado)
+        dos = Pregunta.objects.get(enunciado='Dos')
+
+        self.client.post(reverse('pregunta_mover', args=[dos.pk, 'subir']))
+        self.assertEqual(list(self.actividad.preguntas.values_list('enunciado', flat=True)), ['Dos', 'Uno'])
+
+        self.client.post(reverse('pregunta_eliminar', args=[dos.pk]))
+        self.assertEqual(list(self.actividad.preguntas.values_list('enunciado', flat=True)), ['Uno'])
+        self.assertEqual(self.client.post(reverse('pregunta_mover', args=[dos.pk, 'subir'])).status_code, 404)
+
+    def test_la_pagina_muestra_el_puntaje_total_y_pide_doble_verificacion(self):
+        self.crear_pregunta(puntaje='2')
+        self.crear_pregunta(puntaje='3.5', tipo='desarrollo')
+
+        respuesta = self.client.get(reverse('actividad_formulario', args=[self.actividad.pk]))
+
+        self.assertContains(respuesta, '5,5')
+        self.assertRegex(respuesta.content.decode(), r'id="formPregunta"[^>]*data-confirmar=')
+        self.assertRegex(respuesta.content.decode(), r'action="[^"]*/eliminar/"[^>]*data-confirmar=')
+
+    def test_el_curso_enlaza_a_las_preguntas_solo_en_formularios(self):
+        self.crear_actividad('Informe', '10')
+        self.crear_pregunta()
+
+        respuesta = self.client.get(reverse('profesor_curso', args=[self.curso.pk]))
+
+        self.assertContains(respuesta, 'Preguntas (1)')
+        self.assertContains(respuesta, reverse('actividad_formulario', args=[self.actividad.pk]))
+        archivo = Actividad.objects.get(titulo='Informe')
+        self.assertEqual(self.client.get(reverse('actividad_formulario', args=[archivo.pk])).status_code, 404)
+
+    def test_una_actividad_con_preguntas_no_deja_de_ser_formulario(self):
+        self.crear_pregunta()
+
+        respuesta = self.client.post(reverse('actividad_editar', args=[self.actividad.pk]),
+                                     self.datos_actividad(tipo='archivo', ponderacion='20'))
+
+        self.assertContains(respuesta, 'Elimínelas antes de cambiar el tipo')
+        self.actividad.refresh_from_db()
+        self.assertEqual(self.actividad.tipo, 'formulario')
+
+    def test_otro_profesor_no_accede(self):
+        self.crear_pregunta()
+        pregunta = self.actividad.preguntas.get()
+        self.client.force_login(crear_usuario('marta@ejemplo.cl', '44444444-4', 'Marta', Rol.PROFESOR))
+
+        self.assertEqual(self.client.get(reverse('actividad_formulario', args=[self.actividad.pk])).status_code, 404)
+        self.assertEqual(self.crear_pregunta().status_code, 404)
+        self.assertEqual(self.client.post(reverse('pregunta_eliminar', args=[pregunta.pk])).status_code, 404)
+        self.assertTrue(Pregunta.objects.filter(pk=pregunta.pk).exists())

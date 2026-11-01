@@ -11,4 +11,11 @@ urlpatterns = [
          name='actividad_visibilidad'),
     path('profesor/actividades/<int:pk>/eliminar/', views.actividad_eliminar_view, name='actividad_eliminar'),
     path('profesor/actividades/<int:pk>/calificar/', views.actividad_calificar_view, name='actividad_calificar'),
+
+    # Formularios en línea: preguntas de una actividad
+    path('profesor/actividades/<int:pk>/formulario/', views.actividad_formulario_view, name='actividad_formulario'),
+    path('profesor/actividades/<int:pk>/preguntas/crear/', views.pregunta_crear_view, name='pregunta_crear'),
+    path('profesor/preguntas/<int:pk>/editar/', views.pregunta_editar_view, name='pregunta_editar'),
+    path('profesor/preguntas/<int:pk>/eliminar/', views.pregunta_eliminar_view, name='pregunta_eliminar'),
+    path('profesor/preguntas/<int:pk>/mover/<str:direccion>/', views.pregunta_mover_view, name='pregunta_mover'),
 ]

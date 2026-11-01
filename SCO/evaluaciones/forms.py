@@ -7,7 +7,7 @@ from django.db.models import Sum
 from cursos.models import Clase
 from usuarios.forms import EstiloBootstrapMixin
 
-from .models import NOTA_MAXIMA, NOTA_MINIMA, Actividad, Calificacion
+from .models import NOTA_MAXIMA, NOTA_MINIMA, Actividad, Alternativa, Calificacion, Pregunta
 
 
 def porcentaje(valor):
@@ -54,6 +54,9 @@ class ActividadForm(EstiloBootstrapMixin, forms.ModelForm):
                 disponible = Decimal('100') - asignada
                 self.add_error('ponderacion', f'Las actividades del curso ya suman {porcentaje(asignada)} %. '
                                               f'Puede asignar como máximo {porcentaje(disponible)} %.')
+        if (self.instance.pk and datos.get('tipo') == Actividad.Tipo.ARCHIVO
+                and self.instance.preguntas.exists()):
+            self.add_error('tipo', 'Esta actividad tiene preguntas. Elimínelas antes de cambiar el tipo.')
         return datos
 
 
@@ -123,3 +126,57 @@ class CalificacionesForm(forms.Form):
             )
             calificadas += 1
         return calificadas
+
+
+MINIMO_ALTERNATIVAS = 2
+
+
+class PreguntaForm(EstiloBootstrapMixin, forms.ModelForm):
+    """Pregunta de un formulario en línea. Las alternativas llegan como filas repetidas:
+    `alternativa` trae cada texto y `correcta` la posición de la fila marcada."""
+
+    class Meta:
+        model = Pregunta
+        fields = ['enunciado', 'tipo', 'puntaje']
+        labels = {'enunciado': 'Enunciado', 'tipo': 'Tipo de pregunta', 'puntaje': 'Puntaje'}
+        widgets = {
+            'enunciado': forms.Textarea(attrs={'rows': 3}),
+            'puntaje': forms.NumberInput(attrs={'min': '0.1', 'step': '0.1'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.alternativas = []
+
+    def filas_enviadas(self):
+        """Lo que escribió el profesor, para volver a mostrarlo si hay errores."""
+        if not self.is_bound:
+            return []
+        marcada = self.data.get('correcta')
+        return [{'texto': texto, 'correcta': str(posicion) == marcada}
+                for posicion, texto in enumerate(self.data.getlist('alternativa'))]
+
+    def clean(self):
+        datos = super().clean()
+        if datos.get('tipo') != Pregunta.Tipo.ALTERNATIVAS:
+            return datos
+        filas = [{'texto': fila['texto'].strip(), 'correcta': fila['correcta']} for fila in self.filas_enviadas()]
+        self.alternativas = [fila for fila in filas if fila['texto']]
+        if len(self.alternativas) < MINIMO_ALTERNATIVAS:
+            self.add_error(None, f'Agregue al menos {MINIMO_ALTERNATIVAS} alternativas.')
+        elif any(len(fila['texto']) > 300 for fila in self.alternativas):
+            self.add_error(None, 'Cada alternativa puede tener hasta 300 caracteres.')
+        elif sum(fila['correcta'] for fila in self.alternativas) != 1:
+            self.add_error(None, 'Marque cuál es la alternativa correcta.')
+        return datos
+
+    @transaction.atomic
+    def save(self, commit=True):
+        pregunta = super().save(commit)
+        # Las alternativas se reemplazan completas; una pregunta de desarrollo no tiene
+        pregunta.alternativas.all().delete()
+        if pregunta.tipo == Pregunta.Tipo.ALTERNATIVAS:
+            Alternativa.objects.bulk_create(
+                Alternativa(pregunta=pregunta, texto=fila['texto'], es_correcta=fila['correcta'])
+                for fila in self.alternativas)
+        return pregunta

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Clase, Curso, Inscripcion, Modulo
+from .models import BloqueHorario, Clase, Curso, Inscripcion, Modulo
 
 
 @admin.register(Curso)
@@ -26,3 +26,9 @@ class ModuloAdmin(admin.ModelAdmin):
 class ClaseAdmin(admin.ModelAdmin):
     list_display = ('titulo', 'modulo', 'fecha', 'hora_inicio', 'hora_fin')
     list_filter = ('modulo__curso',)
+
+
+@admin.register(BloqueHorario)
+class BloqueHorarioAdmin(admin.ModelAdmin):
+    list_display = ('curso', 'dia_semana', 'hora_inicio', 'hora_fin', 'sala')
+    list_filter = ('dia_semana', 'curso')

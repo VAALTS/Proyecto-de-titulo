@@ -29,6 +29,11 @@ urlpatterns = [
     # Registro de asistencia (RF-12)
     path('profesor/clases/<int:pk>/asistencia/', views_profesor.clase_asistencia_view, name='clase_asistencia'),
     path('profesor/asistencia/', views_profesor.profesor_asistencia_view, name='profesor_asistencia'),
+    # Horario (RF-09)
+    path('profesor/horario/', views_profesor.profesor_horario_view, name='profesor_horario'),
+    path('profesor/cursos/<int:pk>/bloques/crear/', views_profesor.bloque_crear_view, name='bloque_crear'),
+    path('profesor/bloques/<int:pk>/editar/', views_profesor.bloque_editar_view, name='bloque_editar'),
+    path('profesor/bloques/<int:pk>/eliminar/', views_profesor.bloque_eliminar_view, name='bloque_eliminar'),
     # Descarga protegida: la usan el profesor y, en la fase 4, los alumnos inscritos
     path('material/<int:pk>/descargar/', views_profesor.material_descargar_view, name='material_descargar'),
 

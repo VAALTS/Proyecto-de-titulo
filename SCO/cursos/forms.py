@@ -7,7 +7,7 @@ from django.utils import timezone
 from usuarios.forms import EstiloBootstrapMixin
 from usuarios.models import Rol, Usuario
 
-from .models import Asistencia, Clase, Curso, Inscripcion, Material, Modulo
+from .models import Asistencia, BloqueHorario, Clase, Curso, Inscripcion, Material, Modulo
 
 
 class ProfesorChoiceField(forms.ModelChoiceField):
@@ -201,3 +201,38 @@ class AsistenciaForm(forms.Form):
                 defaults={'presente': self.cleaned_data[self.nombre_campo(inscripcion)] == 'presente',
                           'registrada_por': profesor},
             )
+
+
+class BloqueHorarioForm(EstiloBootstrapMixin, forms.ModelForm):
+    """Bloque semanal de un curso. El profesor no puede tener dos bloques a la misma hora."""
+
+    class Meta:
+        model = BloqueHorario
+        fields = ['dia_semana', 'sala', 'hora_inicio', 'hora_fin']
+        labels = {'dia_semana': 'Día', 'sala': 'Sala o enlace', 'hora_inicio': 'Hora de inicio',
+                  'hora_fin': 'Hora de término'}
+        widgets = {
+            'hora_inicio': forms.TimeInput(attrs={'type': 'time'}, format='%H:%M'),
+            'hora_fin': forms.TimeInput(attrs={'type': 'time'}, format='%H:%M'),
+        }
+
+    def __init__(self, curso, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.curso = curso
+
+    def clean(self):
+        datos = super().clean()
+        dia, inicio, fin = datos.get('dia_semana'), datos.get('hora_inicio'), datos.get('hora_fin')
+        if not (dia and inicio and fin):
+            return datos
+        if fin <= inicio:
+            self.add_error('hora_fin', 'La hora de término debe ser posterior a la de inicio.')
+            return datos
+        choque = (BloqueHorario.objects.filter(curso__profesor=self.curso.profesor, curso__activo=True, dia_semana=dia,
+                                               hora_inicio__lt=fin, hora_fin__gt=inicio)
+                  .exclude(pk=self.instance.pk).select_related('curso').first())
+        if choque:
+            self.add_error(None, f'Este bloque se cruza con «{choque.curso.nombre}» '
+                                 f'({choque.get_dia_semana_display()} {choque.hora_inicio:%H:%M} '
+                                 f'a {choque.hora_fin:%H:%M}).')
+        return datos

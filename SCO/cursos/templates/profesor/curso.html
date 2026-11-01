@@ -26,7 +26,6 @@
             <i class="bi bi-people me-1"></i>Alumnos <span class="badge text-bg-secondary">{{ inscripciones|length }}</span>
         </button>
     </li>
-    {# Secciones de los pasos siguientes de la fase 3 #}
     <li class="nav-item" role="presentation">
         <button class="nav-link" data-bs-toggle="tab" data-bs-target="#actividades" type="button" role="tab">
             <i class="bi bi-clipboard-check me-1"></i>Actividades <span class="badge text-bg-secondary">{{ actividades|length }}</span>
@@ -40,6 +39,11 @@
     <li class="nav-item" role="presentation">
         <button class="nav-link" data-bs-toggle="tab" data-bs-target="#asistencia" type="button" role="tab">
             <i class="bi bi-person-check me-1"></i>Asistencia
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#horario" type="button" role="tab">
+            <i class="bi bi-calendar-week me-1"></i>Horario
         </button>
     </li>
 </ul>
@@ -383,6 +387,54 @@
         </div>
     </div>
 
+    {# ---------- Horario semanal del curso ---------- #}
+    <div class="tab-pane fade" id="horario" role="tabpanel">
+        <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
+            <p class="text-muted mb-0">Los alumnos verán estos bloques en su calendario semanal.</p>
+            <button type="button" class="btn btn-primary abre-modal" data-modal="modalBloque"
+                    data-accion="{% url 'bloque_crear' curso.pk %}" data-titulo-modal="Agregar bloque"
+                    data-confirmar="¿Está seguro de agregar este bloque?" data-dia_semana="1">
+                <i class="bi bi-plus-lg me-1"></i>Agregar bloque
+            </button>
+        </div>
+        <div class="card shadow-sm border-0">
+            <div class="card-body">
+                {% if bloques %}
+                    <ul class="list-group list-group-flush">
+                        {% for bloque in bloques %}
+                            <li class="list-group-item px-0 d-flex flex-wrap gap-2 justify-content-between align-items-center">
+                                <div>
+                                    <div class="fw-semibold">{{ bloque.get_dia_semana_display }}</div>
+                                    <div class="small text-muted">
+                                        {{ bloque.hora_inicio|time:"H:i" }} a {{ bloque.hora_fin|time:"H:i" }}{% if bloque.sala %} · {{ bloque.sala }}{% endif %}
+                                    </div>
+                                </div>
+                                <div class="d-flex gap-1">
+                                    <button type="button" class="btn btn-sm btn-outline-primary abre-modal" title="Editar bloque"
+                                            data-modal="modalBloque" data-accion="{% url 'bloque_editar' bloque.pk %}"
+                                            data-titulo-modal="Editar bloque"
+                                            data-confirmar="¿Está seguro de guardar los cambios de este bloque?"
+                                            data-dia_semana="{{ bloque.dia_semana }}" data-sala="{{ bloque.sala }}"
+                                            data-hora_inicio="{{ bloque.hora_inicio|time:'H:i' }}"
+                                            data-hora_fin="{{ bloque.hora_fin|time:'H:i' }}">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <form method="post" action="{% url 'bloque_eliminar' bloque.pk %}" class="m-0"
+                                          data-confirmar="¿Está seguro de eliminar este bloque del horario?">
+                                        {% csrf_token %}
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Eliminar bloque"><i class="bi bi-trash"></i></button>
+                                    </form>
+                                </div>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="text-muted text-center py-4 mb-0">El curso aún no tiene bloques de horario.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
     {# ---------- Lista de alumnos ---------- #}
     <div class="tab-pane fade" id="alumnos" role="tabpanel">
         <div class="card shadow-sm border-0">
@@ -478,6 +530,29 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
                 <button type="submit" form="formMaterial" class="btn btn-primary">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalBloque" tabindex="-1" aria-labelledby="tituloModalBloque" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="tituloModalBloque">{% if modal_abierto.id == 'modalBloque' %}{{ modal_abierto.titulo }}{% endif %}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <form method="post" id="formBloque" novalidate
+                      {% if modal_abierto.id == 'modalBloque' %}action="{{ modal_abierto.accion }}"{% endif %}
+                      data-confirmar="¿Está seguro de guardar este bloque?">
+                    {% csrf_token %}
+                    {% include 'administrador/_campos_formulario.html' with form=form_bloque %}
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" form="formBloque" class="btn btn-primary">Guardar</button>
             </div>
         </div>
     </div>

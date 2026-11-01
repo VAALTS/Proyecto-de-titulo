@@ -14,18 +14,17 @@ from evaluaciones.forms import ActividadForm
 from usuarios.models import Rol
 from usuarios.views import profesor_required
 
-from .forms import AsistenciaForm, ClaseForm, MaterialForm, ModuloForm
-from .models import Clase, Curso, Inscripcion, Material, Modulo
+from .forms import AsistenciaForm, BloqueHorarioForm, ClaseForm, MaterialForm, ModuloForm
+from .models import BloqueHorario, Clase, Curso, Inscripcion, Material, Modulo
 
-# Accesos del menú del profesor (RF-09). Las secciones sin `url` aún no están construidas
-# y se muestran como «Próximamente» para no dejar enlaces rotos.
+# Accesos del menú del profesor (RF-09)
 SECCIONES_PROFESOR = [
     {'titulo': 'Cursos', 'descripcion': 'Revisa tus cursos, su material, sus alumnos y pasa asistencia.',
      'icono': 'bi-journal-bookmark-fill', 'color': 'primary', 'url': 'profesor_cursos'},
     {'titulo': 'Gestión de Evaluaciones', 'descripcion': 'Crea actividades y registra las calificaciones.',
      'icono': 'bi-clipboard-check-fill', 'color': 'success', 'url': 'profesor_evaluaciones'},
     {'titulo': 'Horario', 'descripcion': 'Consulta tu calendario semanal de clases.',
-     'icono': 'bi-calendar-week-fill', 'color': 'warning', 'url': None},
+     'icono': 'bi-calendar-week-fill', 'color': 'warning', 'url': 'profesor_horario'},
     {'titulo': 'Asistencia por clase', 'descripcion': 'Consulta el historial de asistencia de cada clase.',
      'icono': 'bi-person-check-fill', 'color': 'danger', 'url': 'profesor_asistencia'},
 ]
@@ -59,6 +58,11 @@ def material_propio(request, pk):
                              clase__modulo__curso__profesor=request.user, clase__modulo__curso__activo=True)
 
 
+def bloque_propio(request, pk):
+    return get_object_or_404(BloqueHorario.objects.select_related('curso'), pk=pk,
+                             curso__profesor=request.user, curso__activo=True)
+
+
 def clases_con_asistencia(clases):
     """Agrega a cada clase cuántos alumnos tienen la asistencia registrada y cuántos estuvieron presentes."""
     return clases.annotate(registradas=Count('asistencias', distinct=True),
@@ -87,6 +91,7 @@ FORMULARIOS_CURSO = {
     'modalClase': ('form_clase', lambda curso: ClaseForm(auto_id='clase_%s')),
     'modalMaterial': ('form_material', lambda curso: MaterialForm(auto_id='material_%s')),
     'modalActividad': ('form_actividad', lambda curso: ActividadForm(curso, auto_id='actividad_%s')),
+    'modalBloque': ('form_bloque', lambda curso: BloqueHorarioForm(curso, auto_id='bloque_%s')),
 }
 
 
@@ -113,6 +118,7 @@ def pagina_curso(request, curso, form=None, id_modal='', titulo_modal=''):
         'curso': curso,
         'modulos': modulos,
         'clases': [clase for modulo in modulos for clase in modulo.clases.all()],
+        'bloques': curso.bloques.all(),
         'hoy': timezone.localdate(),
         # Historial de cada alumno: clases con asistencia registrada y cuántas estuvo presente (RF-12)
         'inscripciones': inscripciones.annotate(
@@ -373,3 +379,67 @@ def profesor_asistencia_view(request):
         'curso_elegido': curso_elegido,
         'hoy': timezone.localdate(),
     })
+
+
+# ---------- Horario del curso y calendario semanal (RF-09) ----------
+
+def eventos_de_calendario(bloques, url_curso):
+    """Convierte bloques semanales en eventos repetidos de FullCalendar; cada curso tiene su color.
+
+    `url_curso` recibe un curso y entrega su dirección. FullCalendar numera los días desde el
+    domingo (0), así que dia_semana (lunes = 1) sirve tal cual. También lo usará el alumno (RF-14).
+    """
+    colores = ['#0d6efd', '#198754', '#6f42c1', '#d63384', '#fd7e14', '#20c997']
+    color_por_curso = {}
+    eventos = []
+    for bloque in bloques:
+        color = color_por_curso.setdefault(bloque.curso_id, colores[len(color_por_curso) % len(colores)])
+        eventos.append({
+            'title': f'{bloque.curso.nombre} · {bloque.sala}' if bloque.sala else bloque.curso.nombre,
+            'daysOfWeek': [bloque.dia_semana],
+            'startTime': bloque.hora_inicio.strftime('%H:%M'),
+            'endTime': bloque.hora_fin.strftime('%H:%M'),
+            'color': color,
+            'url': url_curso(bloque.curso),
+        })
+    return eventos
+
+
+@profesor_required
+def profesor_horario_view(request):
+    bloques = BloqueHorario.objects.filter(curso__in=cursos_del_profesor(request.user)).select_related('curso')
+    eventos = eventos_de_calendario(bloques, lambda curso: reverse('profesor_curso', args=[curso.pk]))
+    return render(request, 'profesor/horario.html', {'eventos': eventos})
+
+
+def guardar_bloque(request, form, curso, titulo_modal, mensaje):
+    if not form.is_valid():
+        return pagina_curso(request, curso, form, 'modalBloque', titulo_modal)
+    form.save()
+    messages.success(request, mensaje)
+    return volver_al_curso(curso, 'horario')
+
+
+@profesor_required
+@require_POST
+def bloque_crear_view(request, pk):
+    curso = curso_propio(request, pk)
+    form = BloqueHorarioForm(curso, request.POST, instance=BloqueHorario(curso=curso), auto_id='bloque_%s')
+    return guardar_bloque(request, form, curso, 'Agregar bloque', 'Se agregó el bloque al horario.')
+
+
+@profesor_required
+@require_POST
+def bloque_editar_view(request, pk):
+    bloque = bloque_propio(request, pk)
+    form = BloqueHorarioForm(bloque.curso, request.POST, instance=bloque, auto_id='bloque_%s')
+    return guardar_bloque(request, form, bloque.curso, 'Editar bloque', 'Se guardaron los cambios del bloque.')
+
+
+@profesor_required
+@require_POST
+def bloque_eliminar_view(request, pk):
+    bloque = bloque_propio(request, pk)
+    bloque.delete()
+    messages.success(request, 'Se eliminó el bloque del horario.')
+    return volver_al_curso(bloque.curso, 'horario')

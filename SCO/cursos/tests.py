@@ -13,7 +13,7 @@ from django.utils import timezone
 
 from usuarios.models import Rol, Usuario
 
-from .models import Asistencia, Clase, Curso, Inscripcion, Material, Modulo
+from .models import Asistencia, BloqueHorario, Clase, Curso, Inscripcion, Material, Modulo
 
 
 def crear_usuario(email, rut, nombre, rol, **campos):
@@ -661,6 +661,91 @@ class AsistenciaTests(TestCase):
         self.assertEqual(self.client.get(reverse('clase_asistencia', args=[self.clase.pk])).status_code, 404)
         self.assertEqual(self.registrar().status_code, 404)
         self.assertEqual(self.client.get(reverse('profesor_asistencia')).context['clases'], [])
+
+
+class HorarioTests(TestCase):
+    """RF-09: bloques semanales de cada curso y calendario del profesor."""
+
+    BLOQUE = {'dia_semana': '1', 'sala': 'Sala 2', 'hora_inicio': '09:00', 'hora_fin': '10:30'}
+
+    def setUp(self):
+        self.profesor = crear_usuario('pedro@ejemplo.cl', '11111111-1', 'Pedro', Rol.PROFESOR)
+        self.curso = Curso.objects.create(nombre='Liderazgo', profesor=self.profesor)
+        self.client.force_login(self.profesor)
+
+    def crear_bloque(self, curso=None, **cambios):
+        curso = curso or self.curso
+        return self.client.post(reverse('bloque_crear', args=[curso.pk]), {**self.BLOQUE, **cambios})
+
+    def test_agregar_y_editar_un_bloque(self):
+        respuesta = self.crear_bloque()
+
+        self.assertRedirects(respuesta, f"{reverse('profesor_curso', args=[self.curso.pk])}#horario",
+                             fetch_redirect_response=False)
+        bloque = self.curso.bloques.get()
+        self.assertEqual((bloque.get_dia_semana_display(), bloque.sala), ('Lunes', 'Sala 2'))
+        self.client.post(reverse('bloque_editar', args=[bloque.pk]), {**self.BLOQUE, 'dia_semana': '5'})
+        bloque.refresh_from_db()
+        self.assertEqual(bloque.get_dia_semana_display(), 'Viernes')
+
+    def test_solo_de_lunes_a_viernes_y_terminando_despues_de_empezar(self):
+        self.assertEqual(self.crear_bloque(dia_semana='6').status_code, 200)
+        self.assertContains(self.crear_bloque(hora_fin='08:00'), 'debe ser posterior a la de inicio')
+        self.assertFalse(BloqueHorario.objects.exists())
+
+    def test_rechaza_bloques_que_se_cruzan_aunque_sean_de_otro_curso(self):
+        otro = Curso.objects.create(nombre='Excel', profesor=self.profesor)
+        self.crear_bloque()
+
+        self.assertContains(self.crear_bloque(hora_inicio='10:00', hora_fin='11:00'), 'se cruza con')
+        self.assertContains(self.crear_bloque(otro, hora_inicio='08:30', hora_fin='09:30'), 'se cruza con «Liderazgo»')
+        self.assertEqual(BloqueHorario.objects.count(), 1)
+
+    def test_bloques_contiguos_u_otro_dia_si_se_aceptan(self):
+        self.crear_bloque()
+        self.crear_bloque(hora_inicio='10:30', hora_fin='12:00')
+        self.crear_bloque(dia_semana='2')
+
+        self.assertEqual(BloqueHorario.objects.count(), 3)
+
+    def test_editar_no_choca_consigo_mismo(self):
+        self.crear_bloque()
+        bloque = self.curso.bloques.get()
+
+        self.client.post(reverse('bloque_editar', args=[bloque.pk]), {**self.BLOQUE, 'hora_fin': '11:00'})
+
+        bloque.refresh_from_db()
+        self.assertEqual(bloque.hora_fin.strftime('%H:%M'), '11:00')
+
+    def test_eliminar_un_bloque(self):
+        self.crear_bloque()
+
+        self.client.post(reverse('bloque_eliminar', args=[self.curso.bloques.get().pk]))
+
+        self.assertFalse(BloqueHorario.objects.exists())
+
+    def test_el_calendario_trae_los_bloques_de_sus_cursos_activos(self):
+        self.crear_bloque()
+        eliminado = Curso.objects.create(nombre='Antiguo', profesor=self.profesor)
+        self.crear_bloque(eliminado, dia_semana='3')
+        eliminado.eliminar()
+
+        respuesta = self.client.get(reverse('profesor_horario'))
+
+        self.assertEqual(respuesta.context['eventos'], [{
+            'title': 'Liderazgo · Sala 2', 'daysOfWeek': [1], 'startTime': '09:00', 'endTime': '10:30',
+            'color': '#0d6efd', 'url': reverse('profesor_curso', args=[self.curso.pk]),
+        }])
+        self.assertContains(self.client.get(reverse('profesor_inicio')), f'href="{reverse("profesor_horario")}"')
+
+    def test_otro_profesor_no_accede(self):
+        self.crear_bloque()
+        bloque = self.curso.bloques.get()
+        self.client.force_login(crear_usuario('marta@ejemplo.cl', '22222222-2', 'Marta', Rol.PROFESOR))
+
+        self.assertEqual(self.crear_bloque().status_code, 404)
+        self.assertEqual(self.client.post(reverse('bloque_eliminar', args=[bloque.pk])).status_code, 404)
+        self.assertEqual(self.client.get(reverse('profesor_horario')).context['eventos'], [])
 
 
 class AsignaturasDelProfesorTests(TestCase):

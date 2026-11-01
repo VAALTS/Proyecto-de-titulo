@@ -46,6 +46,37 @@ class Curso(models.Model):
         self.save(update_fields=['activo', 'eliminado_en'])
 
 
+class BloqueHorario(models.Model):
+    """Bloque semanal del horario de un curso, de lunes a viernes (RF-09 y RF-14)."""
+
+    class Dia(models.IntegerChoices):
+        LUNES = 1, 'Lunes'
+        MARTES = 2, 'Martes'
+        MIERCOLES = 3, 'Miércoles'
+        JUEVES = 4, 'Jueves'
+        VIERNES = 5, 'Viernes'
+
+    curso = models.ForeignKey(Curso, on_delete=models.PROTECT, related_name='bloques')
+    dia_semana = models.PositiveSmallIntegerField('día', choices=Dia.choices)
+    hora_inicio = models.TimeField('hora de inicio')
+    hora_fin = models.TimeField('hora de término')
+    sala = models.CharField('sala o enlace', max_length=100, blank=True)
+
+    class Meta:
+        verbose_name = 'bloque de horario'
+        verbose_name_plural = 'bloques de horario'
+        ordering = ['dia_semana', 'hora_inicio']
+        constraints = [
+            models.CheckConstraint(condition=models.Q(dia_semana__gte=1, dia_semana__lte=5),
+                                   name='bloque_de_lunes_a_viernes'),
+            models.CheckConstraint(condition=models.Q(hora_fin__gt=models.F('hora_inicio')),
+                                   name='bloque_termina_despues_de_empezar'),
+        ]
+
+    def __str__(self):
+        return f'{self.curso}: {self.get_dia_semana_display()} {self.hora_inicio:%H:%M}'
+
+
 class Modulo(models.Model):
     """Unidad en que el profesor organiza un curso (RF-10)."""
 

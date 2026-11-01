@@ -1,0 +1,21 @@
+{# Calendario semanal de lunes a viernes con FullCalendar. Recibe `eventos`; lo usan el profesor y el alumno (RF-14). #}
+<div id="calendarioSemanal"></div>
+{{ eventos|json_script:"eventos-calendario" }}
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@fullcalendar/core@6.1.15/locales/es.global.min.js"></script>
+<script>
+    new FullCalendar.Calendar(document.getElementById('calendarioSemanal'), {
+        locale: 'es',
+        initialView: 'timeGridWeek',
+        // Es un horario que se repite cada semana: no se muestran fechas ni botones para cambiar de semana
+        headerToolbar: false,
+        dayHeaderFormat: {weekday: 'long'},
+        weekends: false,
+        allDaySlot: false,
+        slotMinTime: '08:00:00',
+        slotMaxTime: '22:00:00',
+        height: 'auto',
+        nowIndicator: false,
+        events: JSON.parse(document.getElementById('eventos-calendario').textContent),
+    }).render();
+</script>

@@ -1,8 +1,12 @@
 from django.urls import path
 
-from . import views, views_profesor
+from . import views, views_alumno, views_profesor
 
 urlpatterns = [
+    # Menú y cursos del alumno (RF-13)
+    path('alumno/', views_alumno.alumno_inicio_view, name='alumno_inicio'),
+    path('alumno/cursos/', views_alumno.alumno_cursos_view, name='alumno_cursos'),
+
     # Menú y cursos del profesor (RF-09 y RF-10)
     path('profesor/', views_profesor.profesor_inicio_view, name='profesor_inicio'),
     path('profesor/cursos/', views_profesor.profesor_cursos_view, name='profesor_cursos'),

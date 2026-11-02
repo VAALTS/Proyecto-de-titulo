@@ -748,6 +748,60 @@ class HorarioTests(TestCase):
         self.assertEqual(self.client.get(reverse('profesor_horario')).context['eventos'], [])
 
 
+class MenuAlumnoTests(TestCase):
+    """RF-13: menú del alumno y la lista de sus cursos."""
+
+    def setUp(self):
+        self.alumno = crear_usuario('ana@ejemplo.cl', '33333333-3', 'Ana', Rol.ALUMNO)
+        self.profesor = crear_usuario('pedro@ejemplo.cl', '11111111-1', 'Pedro', Rol.PROFESOR)
+        self.client.force_login(self.alumno)
+
+    def test_el_menu_tiene_los_tres_accesos_del_requerimiento(self):
+        respuesta = self.client.get(reverse('alumno_inicio'))
+
+        for titulo in ['Cursos', 'Horario', 'Calificaciones']:
+            with self.subTest(seccion=titulo):
+                self.assertContains(respuesta, f'<h5 class="card-title mt-3">{titulo}</h5>', html=True)
+        self.assertContains(respuesta, f'href="{reverse("alumno_cursos")}"')
+        self.assertContains(respuesta, 'col-12 col-md-4')
+
+    def test_al_ingresar_el_alumno_llega_a_su_menu(self):
+        self.client.logout()
+
+        respuesta = self.client.post(reverse('login'), {'email': 'ana@ejemplo.cl', 'password': 'clave-segura-123'},
+                                     follow=True)
+
+        self.assertRedirects(respuesta, reverse('alumno_inicio'))
+        self.assertTemplateUsed(respuesta, 'alumno/menu.html')
+
+    def test_mis_cursos_muestra_solo_sus_inscripciones_vigentes_en_cursos_activos(self):
+        vigente = Curso.objects.create(nombre='Liderazgo', profesor=self.profesor)
+        retirado = Curso.objects.create(nombre='Retirado', profesor=self.profesor)
+        eliminado = Curso.objects.create(nombre='Eliminado', profesor=self.profesor)
+        Curso.objects.create(nombre='Ajeno', profesor=self.profesor)
+        Inscripcion.objects.create(alumno=self.alumno, curso=vigente)
+        Inscripcion.objects.create(alumno=self.alumno, curso=retirado, activa=False)
+        Inscripcion.objects.create(alumno=self.alumno, curso=eliminado)
+        eliminado.eliminar()
+
+        respuesta = self.client.get(reverse('alumno_cursos'))
+
+        self.assertEqual(list(respuesta.context['cursos']), [vigente])
+        self.assertContains(respuesta, 'Pedro Pérez')
+
+    def test_sin_cursos_muestra_un_aviso(self):
+        self.assertContains(self.client.get(reverse('alumno_cursos')), 'Aún no estás inscrito')
+
+    def test_otros_roles_no_entran_a_las_paginas_del_alumno(self):
+        admin = Usuario.objects.create_superuser('admin@ejemplo.cl', 'clave-segura-123', primer_nombre='Admin')
+
+        for usuario in [self.profesor, admin]:
+            self.client.force_login(usuario)
+            for nombre_url in ['alumno_inicio', 'alumno_cursos']:
+                with self.subTest(rol=usuario.rol, pagina=nombre_url):
+                    self.assertEqual(self.client.get(reverse(nombre_url)).status_code, 302)
+
+
 class AsignaturasDelProfesorTests(TestCase):
     """RF-05: el perfil del profesor muestra las asignaturas que imparte."""
 

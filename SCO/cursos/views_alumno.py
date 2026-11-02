@@ -1,0 +1,33 @@
+"""Vistas del alumno (fase 4: RF-13 a RF-17)."""
+from django.shortcuts import render
+
+from usuarios.views import alumno_required
+
+from .models import Curso
+
+# Accesos del menú del alumno (RF-13). Las secciones sin `url` aún no están construidas
+# y se muestran como «Próximamente» para no dejar enlaces rotos.
+SECCIONES_ALUMNO = [
+    {'titulo': 'Cursos', 'descripcion': 'Revisa el contenido de tus capacitaciones y entrega tus actividades.',
+     'icono': 'bi-journal-bookmark-fill', 'color': 'primary', 'url': 'alumno_cursos'},
+    {'titulo': 'Horario', 'descripcion': 'Consulta tu calendario semanal de clases.',
+     'icono': 'bi-calendar-week-fill', 'color': 'warning', 'url': None},
+    {'titulo': 'Calificaciones', 'descripcion': 'Revisa tus notas y el promedio de cada curso.',
+     'icono': 'bi-clipboard-data-fill', 'color': 'success', 'url': None},
+]
+
+
+def cursos_del_alumno(alumno):
+    """Cursos activos en que el alumno tiene una inscripción vigente."""
+    return (Curso.objects.activos().filter(inscripciones__alumno=alumno, inscripciones__activa=True)
+            .select_related('profesor').order_by('nombre'))
+
+
+@alumno_required
+def alumno_inicio_view(request):
+    return render(request, 'alumno/menu.html', {'secciones': SECCIONES_ALUMNO})
+
+
+@alumno_required
+def alumno_cursos_view(request):
+    return render(request, 'alumno/cursos.html', {'cursos': cursos_del_alumno(request.user)})

@@ -9,9 +9,6 @@ urlpatterns = [
     path('logout/', views.logout_view, name='logout'),
     path('perfil/', views.perfil_view, name='perfil'),
 
-    # Inicio del alumno (el del profesor está en cursos/urls.py)
-    path('alumno/', views.alumno_inicio_view, name='alumno_inicio'),
-
     # Panel del administrador
     path('panel/', views.admin_menu_view, name='admin_menu'),
 ]

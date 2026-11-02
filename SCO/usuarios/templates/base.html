@@ -1,3 +1,4 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -29,7 +30,7 @@
     <nav class="navbar navbar-dark navbar-principal shadow-sm">
         <div class="container">
             <a class="navbar-brand fw-bold" href="{% url 'home' %}">
-                <i class="bi bi-mortarboard-fill me-2"></i>Adapt Academy
+                <img src="{% static 'images/logo_adapt_blanco.png' %}" class="img-fluid" alt="LogoAdaptPNG" style="max-height: 70px;" >
             </a>
 
             {# RF-02: menú de usuario con el cierre de sesión, arriba a la derecha en todas las páginas #}

@@ -3,7 +3,8 @@ from django.shortcuts import render
 
 from usuarios.views import alumno_required
 
-from .models import Curso
+from .calendario import eventos_de_calendario
+from .models import BloqueHorario, Curso
 
 # Accesos del menú del alumno (RF-13). Las secciones sin `url` aún no están construidas
 # y se muestran como «Próximamente» para no dejar enlaces rotos.
@@ -11,7 +12,7 @@ SECCIONES_ALUMNO = [
     {'titulo': 'Cursos', 'descripcion': 'Revisa el contenido de tus capacitaciones y entrega tus actividades.',
      'icono': 'bi-journal-bookmark-fill', 'color': 'primary', 'url': 'alumno_cursos'},
     {'titulo': 'Horario', 'descripcion': 'Consulta tu calendario semanal de clases.',
-     'icono': 'bi-calendar-week-fill', 'color': 'warning', 'url': None},
+     'icono': 'bi-calendar-week-fill', 'color': 'warning', 'url': 'alumno_horario'},
     {'titulo': 'Calificaciones', 'descripcion': 'Revisa tus notas y el promedio de cada curso.',
      'icono': 'bi-clipboard-data-fill', 'color': 'success', 'url': None},
 ]
@@ -31,3 +32,10 @@ def alumno_inicio_view(request):
 @alumno_required
 def alumno_cursos_view(request):
     return render(request, 'alumno/cursos.html', {'cursos': cursos_del_alumno(request.user)})
+
+
+@alumno_required
+def alumno_horario_view(request):
+    """RF-14: calendario semanal con los bloques de los cursos del alumno."""
+    bloques = BloqueHorario.objects.filter(curso__in=cursos_del_alumno(request.user)).select_related('curso')
+    return render(request, 'alumno/horario.html', {'eventos': eventos_de_calendario(bloques)})

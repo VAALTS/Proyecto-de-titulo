@@ -802,6 +802,58 @@ class MenuAlumnoTests(TestCase):
                     self.assertEqual(self.client.get(reverse(nombre_url)).status_code, 302)
 
 
+class HorarioAlumnoTests(TestCase):
+    """RF-14: calendario semanal con los bloques de los cursos del alumno."""
+
+    def setUp(self):
+        self.alumno = crear_usuario('ana@ejemplo.cl', '33333333-3', 'Ana', Rol.ALUMNO)
+        self.profesor = crear_usuario('pedro@ejemplo.cl', '11111111-1', 'Pedro', Rol.PROFESOR)
+        self.curso = Curso.objects.create(nombre='Liderazgo', profesor=self.profesor)
+        self.inscripcion = Inscripcion.objects.create(alumno=self.alumno, curso=self.curso)
+        BloqueHorario.objects.create(curso=self.curso, dia_semana=1, hora_inicio='09:00', hora_fin='10:30',
+                                     sala='Sala 2')
+        self.client.force_login(self.alumno)
+
+    def eventos(self):
+        return self.client.get(reverse('alumno_horario')).context['eventos']
+
+    def test_muestra_los_bloques_de_sus_cursos_en_fullcalendar(self):
+        respuesta = self.client.get(reverse('alumno_horario'))
+
+        self.assertEqual(respuesta.context['eventos'], [{
+            'title': 'Liderazgo · Sala 2', 'daysOfWeek': [1], 'startTime': '09:00', 'endTime': '10:30',
+            'color': '#0d6efd',
+        }])
+        self.assertContains(respuesta, 'fullcalendar@6.1.15')
+        self.assertContains(respuesta, 'weekends: false')
+
+    def test_cada_curso_tiene_su_color(self):
+        otro = Curso.objects.create(nombre='Excel', profesor=self.profesor)
+        Inscripcion.objects.create(alumno=self.alumno, curso=otro)
+        BloqueHorario.objects.create(curso=otro, dia_semana=2, hora_inicio='09:00', hora_fin='10:00')
+
+        self.assertEqual(len({evento['color'] for evento in self.eventos()}), 2)
+
+    def test_no_muestra_cursos_ajenos_retirados_ni_eliminados(self):
+        ajeno = Curso.objects.create(nombre='Ajeno', profesor=self.profesor)
+        BloqueHorario.objects.create(curso=ajeno, dia_semana=2, hora_inicio='09:00', hora_fin='10:00')
+        eliminado = Curso.objects.create(nombre='Eliminado', profesor=self.profesor)
+        Inscripcion.objects.create(alumno=self.alumno, curso=eliminado)
+        BloqueHorario.objects.create(curso=eliminado, dia_semana=3, hora_inicio='09:00', hora_fin='10:00')
+        eliminado.eliminar()
+        self.assertEqual(len(self.eventos()), 1)
+
+        self.inscripcion.activa = False
+        self.inscripcion.save()
+        self.assertEqual(self.eventos(), [])
+
+    def test_el_menu_enlaza_al_horario_y_otro_rol_no_entra(self):
+        self.assertContains(self.client.get(reverse('alumno_inicio')), f'href="{reverse("alumno_horario")}"')
+
+        self.client.force_login(self.profesor)
+        self.assertEqual(self.client.get(reverse('alumno_horario')).status_code, 302)
+
+
 class AsignaturasDelProfesorTests(TestCase):
     """RF-05: el perfil del profesor muestra las asignaturas que imparte."""
 

@@ -14,6 +14,7 @@ from evaluaciones.forms import ActividadForm
 from usuarios.models import Rol
 from usuarios.views import profesor_required
 
+from .calendario import eventos_de_calendario
 from .forms import AsistenciaForm, BloqueHorarioForm, ClaseForm, MaterialForm, ModuloForm
 from .models import BloqueHorario, Clase, Curso, Inscripcion, Material, Modulo
 
@@ -382,28 +383,6 @@ def profesor_asistencia_view(request):
 
 
 # ---------- Horario del curso y calendario semanal (RF-09) ----------
-
-def eventos_de_calendario(bloques, url_curso):
-    """Convierte bloques semanales en eventos repetidos de FullCalendar; cada curso tiene su color.
-
-    `url_curso` recibe un curso y entrega su dirección. FullCalendar numera los días desde el
-    domingo (0), así que dia_semana (lunes = 1) sirve tal cual. También lo usará el alumno (RF-14).
-    """
-    colores = ['#0d6efd', '#198754', '#6f42c1', '#d63384', '#fd7e14', '#20c997']
-    color_por_curso = {}
-    eventos = []
-    for bloque in bloques:
-        color = color_por_curso.setdefault(bloque.curso_id, colores[len(color_por_curso) % len(colores)])
-        eventos.append({
-            'title': f'{bloque.curso.nombre} · {bloque.sala}' if bloque.sala else bloque.curso.nombre,
-            'daysOfWeek': [bloque.dia_semana],
-            'startTime': bloque.hora_inicio.strftime('%H:%M'),
-            'endTime': bloque.hora_fin.strftime('%H:%M'),
-            'color': color,
-            'url': url_curso(bloque.curso),
-        })
-    return eventos
-
 
 @profesor_required
 def profesor_horario_view(request):

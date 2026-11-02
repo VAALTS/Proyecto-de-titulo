@@ -207,3 +207,37 @@ class Asistencia(models.Model):
 
     def __str__(self):
         return f'{self.inscripcion.alumno} en {self.clase}: {"presente" if self.presente else "ausente"}'
+
+
+class TemaForo(models.Model):
+    """Tema de discusión en el foro de un curso (RF-16); su primer mensaje es el planteamiento."""
+
+    curso = models.ForeignKey(Curso, on_delete=models.PROTECT, related_name='temas')
+    autor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='temas_foro')
+    titulo = models.CharField('título', max_length=150)
+    fecha_creacion = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'tema del foro'
+        verbose_name_plural = 'temas del foro'
+        ordering = ['-fecha_creacion']
+
+    def __str__(self):
+        return self.titulo
+
+
+class MensajeForo(models.Model):
+    """Mensaje publicado en un tema del foro; no se edita ni lleva adjuntos."""
+
+    tema = models.ForeignKey(TemaForo, on_delete=models.CASCADE, related_name='mensajes')
+    autor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='mensajes_foro')
+    contenido = models.TextField(max_length=5000)
+    fecha_creacion = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'mensaje del foro'
+        verbose_name_plural = 'mensajes del foro'
+        ordering = ['fecha_creacion', 'pk']
+
+    def __str__(self):
+        return f'{self.autor}: {self.tema}'

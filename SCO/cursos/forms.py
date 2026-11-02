@@ -7,7 +7,7 @@ from django.utils import timezone
 from usuarios.forms import EstiloBootstrapMixin
 from usuarios.models import Rol, Usuario
 
-from .models import Asistencia, BloqueHorario, Clase, Curso, Inscripcion, Material, Modulo
+from .models import Asistencia, BloqueHorario, Clase, Curso, Inscripcion, Material, MensajeForo, Modulo, TemaForo
 
 
 class ProfesorChoiceField(forms.ModelChoiceField):
@@ -235,3 +235,31 @@ class BloqueHorarioForm(EstiloBootstrapMixin, forms.ModelForm):
                                  f'({choque.get_dia_semana_display()} {choque.hora_inicio:%H:%M} '
                                  f'a {choque.hora_fin:%H:%M}).')
         return datos
+
+
+class MensajeForoForm(EstiloBootstrapMixin, forms.ModelForm):
+    """RF-16: respuesta en un tema del foro."""
+
+    class Meta:
+        model = MensajeForo
+        fields = ['contenido']
+        labels = {'contenido': 'Mensaje'}
+        widgets = {'contenido': forms.Textarea(attrs={'rows': 4})}
+
+
+class TemaForoForm(EstiloBootstrapMixin, forms.ModelForm):
+    """RF-16: un tema nace con su primer mensaje."""
+
+    contenido = MensajeForo._meta.get_field('contenido').formfield(label='Mensaje',
+                                                                   widget=forms.Textarea(attrs={'rows': 6}))
+
+    class Meta:
+        model = TemaForo
+        fields = ['titulo']
+        labels = {'titulo': 'Título del tema'}
+
+    @transaction.atomic
+    def save(self, commit=True):
+        tema = super().save(commit)
+        MensajeForo.objects.create(tema=tema, autor=tema.autor, contenido=self.cleaned_data['contenido'])
+        return tema

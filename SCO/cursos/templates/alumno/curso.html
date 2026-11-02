@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{# RF-16: contenido del curso para el alumno: módulos, clases y material visible #}
+{# RF-16: página del curso para el alumno: contenido visible, actividades y foro #}
 
 {% block title %}{{ curso.nombre }}{% endblock %}
 
@@ -27,6 +27,11 @@
     <li class="nav-item" role="presentation">
         <button class="nav-link" data-bs-toggle="tab" data-bs-target="#actividades" type="button" role="tab">
             <i class="bi bi-clipboard-check me-1"></i>Actividades <span class="badge text-bg-secondary">{{ actividades|length }}</span>
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#foro" type="button" role="tab">
+            <i class="bi bi-chat-dots me-1"></i>Foro <span class="badge text-bg-secondary">{{ temas|length }}</span>
         </button>
     </li>
 </ul>
@@ -129,6 +134,11 @@
                 <div class="card-body text-center text-muted py-5">Este curso aún no tiene actividades.</div>
             </div>
         {% endif %}
+    </div>
+
+    {# ---------- Foro ---------- #}
+    <div class="tab-pane fade" id="foro" role="tabpanel">
+        {% include 'cursos/_foro.html' %}
     </div>
 
 </div>

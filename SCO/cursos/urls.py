@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import views, views_alumno, views_profesor
+from . import views, views_alumno, views_foro, views_profesor
 
 urlpatterns = [
     # Menú y cursos del alumno (RF-13 y RF-16)
@@ -43,6 +43,12 @@ urlpatterns = [
     path('profesor/bloques/<int:pk>/eliminar/', views_profesor.bloque_eliminar_view, name='bloque_eliminar'),
     # Descarga protegida: la usan el profesor y los alumnos inscritos
     path('material/<int:pk>/descargar/', views_profesor.material_descargar_view, name='material_descargar'),
+
+    # Foro de cada curso (RF-16)
+    path('cursos/<int:pk>/foro/temas/crear/', views_foro.foro_tema_crear_view, name='foro_tema_crear'),
+    path('foro/temas/<int:pk>/', views_foro.foro_tema_view, name='foro_tema'),
+    path('foro/temas/<int:pk>/eliminar/', views_foro.foro_tema_eliminar_view, name='foro_tema_eliminar'),
+    path('foro/mensajes/<int:pk>/eliminar/', views_foro.foro_mensaje_eliminar_view, name='foro_mensaje_eliminar'),
 
     # Gestión de cursos del administrador (RF-06)
     path('panel/cursos/', views.gestion_cursos_view, name='gestion_cursos'),

@@ -15,7 +15,7 @@ from usuarios.models import Rol
 from usuarios.views import profesor_required
 
 from .calendario import eventos_de_calendario
-from .contenido import organizar_material
+from .contenido import organizar_material, temas_del_foro
 from .forms import AsistenciaForm, BloqueHorarioForm, ClaseForm, MaterialForm, ModuloForm
 from .models import BloqueHorario, Clase, Curso, Inscripcion, Material, Modulo
 
@@ -117,6 +117,7 @@ def pagina_curso(request, curso, form=None, id_modal='', titulo_modal=''):
         'modal_abierto': {'id': id_modal, 'accion': request.path, 'titulo': titulo_modal} if form else None,
         # Actividades y planilla de notas (RF-11)
         **resumen_del_curso(curso, inscripciones),
+        'temas': temas_del_foro(curso),
     }
     for modal, (nombre, vacio) in FORMULARIOS_CURSO.items():
         contexto[nombre] = form if modal == id_modal else vacio(curso)

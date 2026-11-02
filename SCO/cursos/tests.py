@@ -2,6 +2,7 @@ import os
 import shutil
 import tempfile
 from datetime import timedelta
+from decimal import Decimal
 from unittest import mock
 
 from django.conf import settings
@@ -11,6 +12,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from evaluaciones.models import Actividad, Calificacion
 from usuarios.models import Rol, Usuario
 
 from .models import Asistencia, BloqueHorario, Clase, Curso, Inscripcion, Material, Modulo
@@ -852,6 +854,97 @@ class HorarioAlumnoTests(TestCase):
 
         self.client.force_login(self.profesor)
         self.assertEqual(self.client.get(reverse('alumno_horario')).status_code, 302)
+
+
+class PerfilAlumnoTests(TestCase):
+    """RF-17: datos del alumno, sus capacitaciones y las funciones de su cuenta."""
+
+    def setUp(self):
+        self.alumno = crear_usuario('ana@ejemplo.cl', '33333333-3', 'Ana', Rol.ALUMNO)
+        self.profesor = crear_usuario('pedro@ejemplo.cl', '11111111-1', 'Pedro', Rol.PROFESOR)
+        self.curso = Curso.objects.create(nombre='Liderazgo', profesor=self.profesor)
+        self.inscripcion = Inscripcion.objects.create(alumno=self.alumno, curso=self.curso)
+        self.client.force_login(self.alumno)
+
+    def calificar(self, nota, ponderacion):
+        modulo = Modulo.objects.create(curso=self.curso, nombre='Fundamentos')
+        clase = Clase.objects.create(modulo=modulo, titulo='Introducción', fecha=timezone.localdate(),
+                                     hora_inicio='09:00', hora_fin='10:30')
+        actividad = Actividad.objects.create(clase=clase, titulo='Informe', ponderacion=Decimal(ponderacion),
+                                             fecha_limite=timezone.now())
+        Calificacion.objects.create(actividad=actividad, inscripcion=self.inscripcion, nota=Decimal(nota),
+                                    registrada_por=self.profesor)
+
+    def test_muestra_sus_datos_y_sus_capacitaciones_con_el_promedio(self):
+        self.calificar('6.5', '100')
+
+        respuesta = self.client.get(reverse('perfil'))
+
+        self.assertContains(respuesta, 'ana@ejemplo.cl')
+        self.assertContains(respuesta, '33333333-3')
+        self.assertContains(respuesta, 'Mis capacitaciones')
+        self.assertContains(respuesta, '<td class="fw-semibold">Liderazgo</td>', html=True)
+        self.assertContains(respuesta, '<span class="fw-bold">6,5</span>', html=True)
+        self.assertNotContains(respuesta, 'parcial (')
+
+    def test_el_promedio_parcial_se_indica(self):
+        self.calificar('6.5', '30')
+
+        self.assertContains(self.client.get(reverse('perfil')), 'parcial (30 % evaluado)')
+
+    def test_no_lista_cursos_ajenos_retirados_ni_eliminados(self):
+        Curso.objects.create(nombre='Ajeno', profesor=self.profesor)
+        retirado = Curso.objects.create(nombre='Retirado', profesor=self.profesor)
+        Inscripcion.objects.create(alumno=self.alumno, curso=retirado, activa=False)
+        eliminado = Curso.objects.create(nombre='Eliminado', profesor=self.profesor)
+        Inscripcion.objects.create(alumno=self.alumno, curso=eliminado)
+        eliminado.eliminar()
+
+        capacitaciones = self.client.get(reverse('perfil')).context['capacitaciones']
+
+        self.assertEqual([resumen['curso'] for resumen in capacitaciones], [self.curso])
+
+    def test_tiene_los_botones_del_requerimiento(self):
+        respuesta = self.client.get(reverse('perfil'))
+
+        self.assertContains(respuesta, 'href="#cambiar-contrasena"')
+        self.assertContains(respuesta, 'id="cambiar-contrasena"')
+        self.assertContains(respuesta, f'href="{reverse("alumno_horario")}"')
+        self.assertContains(respuesta, f'href="{reverse("alumno_calificaciones")}"')
+        # Uno en el menú de usuario y otro en el perfil
+        self.assertContains(respuesta, f'action="{reverse("logout")}"', count=2)
+
+    def test_sin_cursos_muestra_un_aviso(self):
+        self.inscripcion.activa = False
+        self.inscripcion.save()
+
+        self.assertContains(self.client.get(reverse('perfil')), 'Aún no estás inscrito')
+
+    def test_si_la_contrasena_no_se_cambia_sigue_viendo_sus_capacitaciones(self):
+        respuesta = self.client.post(reverse('perfil'), {'old_password': 'incorrecta', 'new_password1': 'x',
+                                                         'new_password2': 'x'})
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertContains(respuesta, 'Mis capacitaciones')
+
+    def test_con_clave_temporal_no_ve_el_consolidado_ni_los_accesos(self):
+        self.alumno.debe_cambiar_contrasena = True
+        self.alumno.save()
+
+        respuesta = self.client.get(reverse('perfil'))
+
+        self.assertContains(respuesta, 'contraseña temporal')
+        self.assertNotContains(respuesta, 'Mis capacitaciones')
+        self.assertNotContains(respuesta, 'Consultar horario')
+
+    def test_los_otros_roles_no_ven_la_seccion_del_alumno(self):
+        self.client.force_login(self.profesor)
+
+        respuesta = self.client.get(reverse('perfil'))
+
+        self.assertContains(respuesta, 'Cambiar contraseña')
+        self.assertNotContains(respuesta, 'Mis capacitaciones')
+        self.assertNotContains(respuesta, 'Consultar horario')
 
 
 class AsignaturasDelProfesorTests(TestCase):

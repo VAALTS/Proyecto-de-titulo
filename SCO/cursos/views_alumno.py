@@ -5,7 +5,7 @@ from evaluaciones.calculos import calificaciones_del_alumno
 from usuarios.views import alumno_required
 
 from .calendario import eventos_de_calendario
-from .models import BloqueHorario, Curso, Inscripcion
+from .models import BloqueHorario, Curso
 
 # Accesos del menú del alumno (RF-13)
 SECCIONES_ALUMNO = [
@@ -44,7 +44,4 @@ def alumno_horario_view(request):
 @alumno_required
 def alumno_calificaciones_view(request):
     """RF-15: notas agrupadas por curso, con el promedio ponderado calculado en cada consulta."""
-    inscripciones = (Inscripcion.objects.filter(alumno=request.user, activa=True,
-                                                curso__in=cursos_del_alumno(request.user))
-                     .select_related('curso__profesor').order_by('curso__nombre'))
-    return render(request, 'alumno/calificaciones.html', {'cursos': calificaciones_del_alumno(inscripciones)})
+    return render(request, 'alumno/calificaciones.html', {'cursos': calificaciones_del_alumno(request.user)})

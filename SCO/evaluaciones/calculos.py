@@ -3,6 +3,8 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from django.db.models import Count
 
+from cursos.models import Inscripcion
+
 from .models import Actividad, Calificacion
 
 
@@ -42,13 +44,14 @@ def resumen_del_curso(curso, inscripciones):
     }
 
 
-def calificaciones_del_alumno(inscripciones):
-    """Notas de un alumno agrupadas por curso, con el promedio de cada uno (RF-15).
+def calificaciones_del_alumno(alumno):
+    """Notas de un alumno agrupadas por curso, con el promedio de cada uno (RF-15 y RF-17).
 
     Una actividad oculta aparece solo si ya tiene nota: así el promedio coincide con el de la planilla
     del profesor, que cuenta todas las notas.
     """
-    inscripciones = list(inscripciones)
+    inscripciones = list(Inscripcion.objects.filter(alumno=alumno, activa=True, curso__activo=True)
+                         .select_related('curso__profesor').order_by('curso__nombre'))
     actividades_por_curso = {}
     for actividad in (Actividad.objects.filter(clase__modulo__curso__in=[i.curso_id for i in inscripciones])
                       .select_related('clase__modulo').order_by('fecha_limite', 'titulo')):

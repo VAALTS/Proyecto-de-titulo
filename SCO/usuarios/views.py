@@ -10,6 +10,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from cursos.models import Curso, Inscripcion
+from evaluaciones.calculos import calificaciones_del_alumno
 
 from .cuentas import asignar_clave_temporal
 from .forms import CambioContrasenaForm, CuentaForm, LoginForm
@@ -77,7 +78,12 @@ def perfil_view(request):
         messages.success(request, 'Tu contraseña se actualizó correctamente.')
         return redirect('perfil')
 
-    return render(request, 'perfil/perfil.html', {'form': form})
+    # RF-17: consolidado del alumno; con clave temporal solo puede cambiarla (ver el middleware)
+    capacitaciones = None
+    if request.user.rol == Rol.ALUMNO and not request.user.debe_cambiar_contrasena:
+        capacitaciones = calificaciones_del_alumno(request.user)
+
+    return render(request, 'perfil/perfil.html', {'form': form, 'capacitaciones': capacitaciones})
 
 
 # Los menús del profesor y del alumno están en cursos/views_profesor.py y cursos/views_alumno.py

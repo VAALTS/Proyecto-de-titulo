@@ -5,7 +5,11 @@ from django.db.models import Count
 
 from cursos.models import Inscripcion
 
-from .models import Actividad, Calificacion
+from .models import NOTA_MAXIMA, NOTA_MINIMA, Actividad, Calificacion
+
+# Escala chilena: con el 60 % del puntaje se obtiene la nota de aprobación
+EXIGENCIA = Decimal('0.6')
+NOTA_APROBACION = Decimal('4.0')
 
 
 def promedio_ponderado(notas_y_ponderaciones):
@@ -81,3 +85,26 @@ def actividades_del_alumno(inscripcion):
         actividad.entrega = entregas.get(actividad.pk)
         actividad.calificacion = calificaciones.get(actividad.pk)
     return actividades
+
+
+def nota_por_puntaje(puntaje, total):
+    """Convierte un puntaje en una nota de 1,0 a 7,0, con 60 % de exigencia y un decimal."""
+    aprobacion = total * EXIGENCIA
+    if puntaje < aprobacion:
+        nota = NOTA_MINIMA + (NOTA_APROBACION - NOTA_MINIMA) * puntaje / aprobacion
+    else:
+        nota = NOTA_APROBACION + (NOTA_MAXIMA - NOTA_APROBACION) * (puntaje - aprobacion) / (total - aprobacion)
+    return nota.quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)
+
+
+def calificar_formulario(entrega, profesor):
+    """Registra la nota de un formulario cuando todas sus respuestas tienen puntaje; si no, devuelve None."""
+    respuestas = list(entrega.respuestas.select_related('pregunta'))
+    if any(respuesta.puntaje_obtenido is None for respuesta in respuestas):
+        return None
+    puntaje = sum((respuesta.puntaje_obtenido for respuesta in respuestas), Decimal('0'))
+    total = sum((respuesta.pregunta.puntaje for respuesta in respuestas), Decimal('0'))
+    calificacion, _ = Calificacion.objects.update_or_create(
+        actividad_id=entrega.actividad_id, inscripcion_id=entrega.inscripcion_id,
+        defaults={'nota': nota_por_puntaje(puntaje, total), 'registrada_por': profesor})
+    return calificacion

@@ -3,13 +3,14 @@ from decimal import Decimal
 from django import forms
 from django.core.validators import FileExtensionValidator
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Count, Q, Sum
 
 from cursos.forms import EXTENSIONES_PERMITIDAS, TAMANO_MAXIMO_MB, validar_tamano
 from cursos.models import Clase
 from usuarios.forms import EstiloBootstrapMixin
 
-from .models import NOTA_MAXIMA, NOTA_MINIMA, Actividad, Alternativa, Calificacion, Entrega, Pregunta
+from .calculos import calificar_formulario
+from .models import NOTA_MAXIMA, NOTA_MINIMA, Actividad, Alternativa, Calificacion, Entrega, Pregunta, Respuesta
 
 
 def porcentaje(valor):
@@ -64,8 +65,17 @@ class ActividadForm(EstiloBootstrapMixin, forms.ModelForm):
         return datos
 
 
-class NotaField(forms.DecimalField):
-    """Nota de 1,0 a 7,0 con un decimal; acepta coma o punto."""
+class DecimalConComaField(forms.DecimalField):
+    """Acepta coma o punto como separador decimal."""
+
+    def to_python(self, valor):
+        if isinstance(valor, str):
+            valor = valor.strip().replace(',', '.')
+        return super().to_python(valor)
+
+
+class NotaField(DecimalConComaField):
+    """Nota de 1,0 a 7,0 con un decimal."""
 
     def __init__(self, **kwargs):
         super().__init__(min_value=NOTA_MINIMA, max_value=NOTA_MAXIMA, max_digits=2, decimal_places=1,
@@ -78,11 +88,6 @@ class NotaField(forms.DecimalField):
             'max_digits': 'Use un solo decimal.',
         })
 
-    def to_python(self, valor):
-        if isinstance(valor, str):
-            valor = valor.strip().replace(',', '.')
-        return super().to_python(valor)
-
 
 class CalificacionesForm(forms.Form):
     """Planilla de notas de una actividad: una nota y una observación por alumno inscrito, junto a su entrega."""
@@ -92,7 +97,8 @@ class CalificacionesForm(forms.Form):
         self.actividad = actividad
         self.inscripciones = list(inscripciones)
         registradas = {c.inscripcion_id: c for c in actividad.calificaciones.all()}
-        self.entregas = {e.inscripcion_id: e for e in actividad.entregas.all()}
+        self.entregas = {e.inscripcion_id: e for e in actividad.entregas.annotate(
+            por_corregir=Count('respuestas', filter=Q(respuestas__puntaje_obtenido__isnull=True)))}
         for inscripcion in self.inscripciones:
             actual = registradas.get(inscripcion.pk)
             self.fields[f'nota_{inscripcion.pk}'] = NotaField(
@@ -137,6 +143,8 @@ class CalificacionesForm(forms.Form):
 class EntregaForm(EstiloBootstrapMixin, forms.Form):
     """RF-16: archivo que entrega el alumno, con los mismos límites del material del profesor."""
 
+    mensaje_exito = 'Tu entrega se guardó correctamente.'
+
     archivo = forms.FileField(
         label='Archivo', max_length=255, widget=forms.FileInput,
         validators=[FileExtensionValidator(EXTENSIONES_PERMITIDAS), validar_tamano],
@@ -153,6 +161,79 @@ class EntregaForm(EstiloBootstrapMixin, forms.Form):
         if anterior:
             entrega.archivo.storage.delete(anterior)
         return entrega
+
+
+class RespuestasForm(forms.Form):
+    """RF-16: respuestas del alumno a un formulario en línea; todas las preguntas son obligatorias."""
+
+    mensaje_exito = 'Tus respuestas se enviaron correctamente.'
+
+    def __init__(self, actividad, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.preguntas = list(actividad.preguntas.all())
+        for pregunta in self.preguntas:
+            if pregunta.tipo == Pregunta.Tipo.ALTERNATIVAS:
+                campo = forms.ModelChoiceField(pregunta.alternativas.all(), empty_label=None,
+                                               widget=forms.RadioSelect(attrs={'class': 'form-check-input'}),
+                                               error_messages={'required': 'Elige una alternativa.'})
+            else:
+                campo = forms.CharField(widget=forms.Textarea(attrs={'rows': 4, 'class': 'form-control'}),
+                                        error_messages={'required': 'Escribe tu respuesta.'})
+            self.fields[f'pregunta_{pregunta.pk}'] = campo
+
+    def filas(self):
+        return [(pregunta, self[f'pregunta_{pregunta.pk}']) for pregunta in self.preguntas]
+
+    @transaction.atomic
+    def save(self, actividad, inscripcion):
+        """Las alternativas se corrigen al guardar; si no hay desarrollo, la nota queda registrada."""
+        entrega = Entrega.objects.create(actividad=actividad, inscripcion=inscripcion)
+        for pregunta in self.preguntas:
+            valor = self.cleaned_data[f'pregunta_{pregunta.pk}']
+            if pregunta.tipo == Pregunta.Tipo.ALTERNATIVAS:
+                Respuesta.objects.create(entrega=entrega, pregunta=pregunta, alternativa=valor,
+                                         puntaje_obtenido=pregunta.puntaje if valor.es_correcta else Decimal('0'))
+            else:
+                Respuesta.objects.create(entrega=entrega, pregunta=pregunta, texto=valor)
+        calificar_formulario(entrega, actividad.curso.profesor)
+        return entrega
+
+
+class CorreccionForm(EstiloBootstrapMixin, forms.Form):
+    """Puntaje de cada respuesta de desarrollo; las de alternativas ya vienen corregidas."""
+
+    def __init__(self, entrega, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.entrega = entrega
+        self.respuestas = list(entrega.respuestas.select_related('pregunta').prefetch_related('pregunta__alternativas')
+                               .order_by('pregunta__orden', 'pregunta__pk'))
+        for respuesta in self.respuestas:
+            maximo = respuesta.pregunta.puntaje
+            if respuesta.pregunta.tipo == Pregunta.Tipo.DESARROLLO:
+                self.fields[f'puntaje_{respuesta.pk}'] = DecimalConComaField(
+                    min_value=Decimal('0'), max_value=maximo, max_digits=4, decimal_places=1,
+                    initial=respuesta.puntaje_obtenido, label='Puntaje obtenido',
+                    widget=forms.TextInput(attrs={'inputmode': 'decimal', 'autocomplete': 'off'}),
+                    error_messages={
+                        'required': 'Asigne el puntaje de esta respuesta.',
+                        'invalid': 'Ingrese un puntaje válido, por ejemplo 1,5.',
+                        'min_value': 'El puntaje no puede ser negativo.',
+                        'max_value': f'El máximo de esta pregunta es {porcentaje(maximo)}.',
+                        'max_decimal_places': 'Use un solo decimal.',
+                        'max_digits': 'Use un solo decimal.',
+                    })
+
+    def filas(self):
+        return [(respuesta, self[f'puntaje_{respuesta.pk}'] if f'puntaje_{respuesta.pk}' in self.fields else None)
+                for respuesta in self.respuestas]
+
+    @transaction.atomic
+    def save(self, profesor):
+        for respuesta, campo in self.filas():
+            if campo:
+                respuesta.puntaje_obtenido = self.cleaned_data[campo.name]
+                respuesta.save(update_fields=['puntaje_obtenido'])
+        return calificar_formulario(self.entrega, profesor)
 
 
 MINIMO_ALTERNATIVAS = 2

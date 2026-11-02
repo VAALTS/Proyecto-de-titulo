@@ -132,6 +132,29 @@ class Entrega(models.Model):
         return os.path.basename(self.archivo.name) if self.archivo else ''
 
 
+class Respuesta(models.Model):
+    """Respuesta a una pregunta dentro de la entrega de un formulario (RF-16)."""
+
+    entrega = models.ForeignKey(Entrega, on_delete=models.CASCADE, related_name='respuestas')
+    pregunta = models.ForeignKey(Pregunta, on_delete=models.PROTECT, related_name='respuestas')
+    alternativa = models.ForeignKey(Alternativa, on_delete=models.PROTECT, null=True, blank=True,
+                                    related_name='respuestas')
+    texto = models.TextField(blank=True)
+    # Nulo mientras el profesor no corrija una respuesta de desarrollo
+    puntaje_obtenido = models.DecimalField(max_digits=4, decimal_places=1, null=True, blank=True,
+                                           validators=[MinValueValidator(Decimal('0'))])
+
+    class Meta:
+        verbose_name = 'respuesta'
+        verbose_name_plural = 'respuestas'
+        constraints = [
+            models.UniqueConstraint(fields=['entrega', 'pregunta'], name='respuesta_unica_por_pregunta'),
+        ]
+
+    def __str__(self):
+        return f'{self.entrega}: {self.pregunta}'
+
+
 class Calificacion(models.Model):
     """Nota de un alumno en una actividad, en escala de 1,0 a 7,0 (RF-11).
 

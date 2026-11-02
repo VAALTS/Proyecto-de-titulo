@@ -55,7 +55,21 @@
             <div class="card-body">
                 <h5 class="card-title mb-3">Tu entrega</h5>
                 {% if actividad.tipo == 'formulario' %}
-                    <p class="text-muted mb-0">El formulario en línea estará disponible próximamente.</p>
+                    {% if entrega %}
+                        <p class="mb-0">Respondiste el {{ entrega.fecha_entrega|date:"d/m/Y H:i" }}.</p>
+                        {% if not calificacion %}
+                            <p class="small text-muted mt-2 mb-0">Tu nota aparecerá cuando tu profesor corrija las preguntas de desarrollo.</p>
+                        {% endif %}
+                    {% elif puede_entregar %}
+                        <p class="mb-0">Responde todas las preguntas y envíalas al final de esta página. Solo puedes enviarlas una vez.</p>
+                    {% elif calificacion %}
+                        <p class="small text-muted mb-0">La actividad ya fue calificada, así que ya no se puede responder.</p>
+                    {% elif actividad.abierta %}
+                        <p class="text-muted mb-0">Tu profesor aún no publica las preguntas.</p>
+                    {% else %}
+                        <p class="text-muted">No registras una entrega en esta actividad.</p>
+                        <p class="small text-muted mb-0">El plazo de entrega ya terminó.</p>
+                    {% endif %}
                 {% else %}
                     {% if entrega %}
                         <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
@@ -89,6 +103,43 @@
             </div>
         </div>
     </div>
+
+    {% if actividad.tipo == 'formulario' and puede_entregar %}
+        <div class="col-12">
+            <div class="card shadow-sm border-0">
+                <div class="card-body">
+                    <h5 class="card-title mb-3">Preguntas</h5>
+                    {% if form.errors %}
+                        <div class="alert alert-danger py-2" role="alert">Responde todas las preguntas; tus respuestas aún no se han enviado.</div>
+                    {% endif %}
+                    <form method="post" novalidate
+                          data-confirmar="¿Seguro que quieres enviar tus respuestas? Solo puedes hacerlo una vez.">
+                        {% csrf_token %}
+                        {% for pregunta, campo in form.filas %}
+                            <fieldset class="mb-4">
+                                <legend class="fs-6 fw-semibold">
+                                    {{ forloop.counter }}. {{ pregunta.enunciado|linebreaksbr }}
+                                    <span class="small fw-normal text-muted">({{ pregunta.puntaje }} punto{{ pregunta.puntaje|pluralize }})</span>
+                                </legend>
+                                {% if pregunta.tipo == 'alternativas' %}
+                                    {% for opcion in campo %}
+                                        <div class="form-check">
+                                            {{ opcion.tag }}
+                                            <label class="form-check-label" for="{{ opcion.id_for_label }}">{{ opcion.choice_label }}</label>
+                                        </div>
+                                    {% endfor %}
+                                {% else %}
+                                    {{ campo }}
+                                {% endif %}
+                                {% for error in campo.errors %}<div class="small text-danger mt-1">{{ error }}</div>{% endfor %}
+                            </fieldset>
+                        {% endfor %}
+                        <button type="submit" class="btn btn-success"><i class="bi bi-send me-1"></i>Enviar respuestas</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    {% endif %}
 
 </div>
 {% endblock %}

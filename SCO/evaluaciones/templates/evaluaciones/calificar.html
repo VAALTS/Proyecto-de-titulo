@@ -33,7 +33,7 @@
                         <thead class="table-light">
                             <tr>
                                 <th>Alumno</th>
-                                {% if actividad.tipo == 'archivo' %}<th>Entrega</th>{% endif %}
+                                <th>Entrega</th>
                                 <th style="width: 9rem;">Nota</th>
                                 <th style="min-width: 12rem;">Observación</th>
                             </tr>
@@ -45,19 +45,27 @@
                                         <label for="{{ nota.id_for_label }}" class="fw-semibold mb-0">{{ inscripcion.alumno.get_full_name }}</label>
                                         <div class="small text-muted">{{ inscripcion.alumno.rut }}</div>
                                     </td>
-                                    {% if actividad.tipo == 'archivo' %}
-                                        <td>
-                                            {% if entrega %}
+                                    <td>
+                                        {% if not entrega %}
+                                            <span class="small text-muted text-nowrap">Sin entrega</span>
+                                        {% else %}
+                                            {% if actividad.tipo == 'archivo' %}
                                                 <a href="{% url 'entrega_descargar' entrega.pk %}" class="btn btn-sm btn-outline-primary text-nowrap"
                                                    title="{{ entrega.nombre_archivo }}">
                                                     <i class="bi bi-download me-1"></i>Descargar
                                                 </a>
-                                                <div class="small text-muted text-nowrap">{{ entrega.fecha_entrega|date:"d/m/Y H:i" }}</div>
+                                            {% elif entrega.por_corregir %}
+                                                <a href="{% url 'entrega_corregir' entrega.pk %}" class="btn btn-sm btn-warning text-nowrap">
+                                                    <i class="bi bi-pencil-square me-1"></i>Corregir
+                                                </a>
                                             {% else %}
-                                                <span class="small text-muted text-nowrap">Sin entrega</span>
+                                                <a href="{% url 'entrega_corregir' entrega.pk %}" class="btn btn-sm btn-outline-primary text-nowrap">
+                                                    <i class="bi bi-list-check me-1"></i>Ver respuestas
+                                                </a>
                                             {% endif %}
-                                        </td>
-                                    {% endif %}
+                                            <div class="small text-muted text-nowrap">{{ entrega.fecha_entrega|date:"d/m/Y H:i" }}</div>
+                                        {% endif %}
+                                    </td>
                                     <td>
                                         <input type="text" name="{{ nota.html_name }}" id="{{ nota.id_for_label }}"
                                                value="{{ nota.value|default_if_none:'' }}" inputmode="decimal" autocomplete="off"

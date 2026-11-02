@@ -16,6 +16,7 @@ urlpatterns = [
          name='actividad_visibilidad'),
     path('profesor/actividades/<int:pk>/eliminar/', views.actividad_eliminar_view, name='actividad_eliminar'),
     path('profesor/actividades/<int:pk>/calificar/', views.actividad_calificar_view, name='actividad_calificar'),
+    path('profesor/entregas/<int:pk>/corregir/', views.entrega_corregir_view, name='entrega_corregir'),
 
     # Formularios en línea: preguntas de una actividad
     path('profesor/actividades/<int:pk>/formulario/', views.actividad_formulario_view, name='actividad_formulario'),

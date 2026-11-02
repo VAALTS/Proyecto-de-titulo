@@ -24,8 +24,9 @@
                             <span class="small text-muted">
                                 <i class="bi bi-person-workspace me-1"></i>{{ curso.profesor.get_short_name }}
                             </span>
-                            {# La página de cada curso llega en el paso 5 (RF-16) #}
-                            <span class="btn btn-outline-secondary btn-sm disabled" aria-disabled="true">Próximamente</span>
+                            <a href="{% url 'alumno_curso' curso.pk %}" class="btn btn-primary btn-sm stretched-link">
+                                Abrir curso<i class="bi bi-arrow-right ms-1"></i>
+                            </a>
                         </div>
                     </div>
                 </div>

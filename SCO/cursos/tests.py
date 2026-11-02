@@ -530,6 +530,15 @@ class MaterialTests(TestCase):
         self.assertEqual(self.client.get(reverse('material_descargar', args=[carpeta.contenido.get().pk])).status_code,
                          404)
 
+    def test_el_alumno_retirado_ya_no_descarga(self):
+        self.subir()
+        Inscripcion.objects.filter(alumno=self.alumno).update(activa=False)
+        self.client.force_login(self.alumno)
+
+        respuesta = self.client.get(reverse('material_descargar', args=[self.clase.materiales.get().pk]))
+
+        self.assertEqual(respuesta.status_code, 404)
+
     def test_quien_no_es_del_curso_no_descarga_ni_modifica(self):
         self.subir()
         material = self.clase.materiales.get()
@@ -824,7 +833,7 @@ class HorarioAlumnoTests(TestCase):
 
         self.assertEqual(respuesta.context['eventos'], [{
             'title': 'Liderazgo · Sala 2', 'daysOfWeek': [1], 'startTime': '09:00', 'endTime': '10:30',
-            'color': '#0d6efd',
+            'color': '#0d6efd', 'url': reverse('alumno_curso', args=[self.curso.pk]),
         }])
         self.assertContains(respuesta, 'fullcalendar@6.1.15')
         self.assertContains(respuesta, 'weekends: false')
@@ -856,6 +865,112 @@ class HorarioAlumnoTests(TestCase):
         self.assertEqual(self.client.get(reverse('alumno_horario')).status_code, 302)
 
 
+class CursoAlumnoTests(TestCase):
+    """RF-16: el alumno ve el contenido de sus cursos y solo el material visible."""
+
+    def setUp(self):
+        self.alumno = crear_usuario('ana@ejemplo.cl', '33333333-3', 'Ana', Rol.ALUMNO)
+        self.profesor = crear_usuario('pedro@ejemplo.cl', '11111111-1', 'Pedro', Rol.PROFESOR)
+        self.curso = Curso.objects.create(nombre='Liderazgo', descripcion='Curso para jefaturas',
+                                          profesor=self.profesor)
+        self.inscripcion = Inscripcion.objects.create(alumno=self.alumno, curso=self.curso)
+        self.modulo = Modulo.objects.create(curso=self.curso, nombre='Fundamentos')
+        self.clase = self.crear_clase(self.modulo, 'Introducción')
+        self.url = reverse('alumno_curso', args=[self.curso.pk])
+        self.client.force_login(self.alumno)
+
+    def crear_clase(self, modulo, titulo):
+        return Clase.objects.create(modulo=modulo, titulo=titulo, fecha='2026-11-02', hora_inicio='09:00',
+                                    hora_fin='10:30')
+
+    def crear_material(self, titulo, tipo='enlace', **campos):
+        if tipo == 'enlace':
+            campos.setdefault('url', 'https://ejemplo.cl/video')
+        return Material.objects.create(clase=self.clase, subido_por=self.profesor, titulo=titulo, tipo=tipo, **campos)
+
+    def test_muestra_el_curso_con_sus_modulos_en_orden_y_sus_clases(self):
+        segundo = Modulo.objects.create(curso=self.curso, nombre='Práctica')
+        self.crear_clase(segundo, 'Taller')
+        Modulo.objects.filter(pk=segundo.pk).update(orden=0)
+
+        respuesta = self.client.get(self.url)
+
+        self.assertEqual([modulo.nombre for modulo in respuesta.context['modulos']], ['Práctica', 'Fundamentos'])
+        self.assertContains(respuesta, 'Curso para jefaturas')
+        self.assertContains(respuesta, 'Pedro Pérez')
+        self.assertContains(respuesta, 'Introducción')
+        self.assertContains(respuesta, 'Taller')
+        self.assertContains(respuesta, '09:00 a 10:30')
+
+    def test_los_archivos_tienen_un_boton_de_descarga(self):
+        material = self.crear_material('Guía 1', 'archivo', archivo='material/curso_1/abc/guia.pdf')
+
+        respuesta = self.client.get(self.url)
+
+        self.assertContains(respuesta, f'href="{reverse("material_descargar", args=[material.pk])}"')
+        self.assertContains(respuesta, 'Descargar')
+        self.assertContains(respuesta, '(guia.pdf)')
+
+    def test_los_enlaces_externos_abren_en_una_pestana_nueva(self):
+        self.crear_material('Video')
+
+        self.assertContains(self.client.get(self.url),
+                            'href="https://ejemplo.cl/video" target="_blank" rel="noopener noreferrer"')
+
+    def test_no_muestra_lo_oculto_ni_las_carpetas_sin_nada_visible(self):
+        self.crear_material('Enlace oculto', visible=False)
+        oculta = self.crear_material('Carpeta oculta', 'carpeta', visible=False)
+        self.crear_material('Dentro de la oculta', carpeta=oculta)
+        self.crear_material('Carpeta vacía', 'carpeta')
+        solo_ocultos = self.crear_material('Carpeta sin visibles', 'carpeta')
+        self.crear_material('Oculto en carpeta', carpeta=solo_ocultos, visible=False)
+        guias = self.crear_material('Guías', 'carpeta')
+        self.crear_material('Guía visible', carpeta=guias)
+
+        respuesta = self.client.get(self.url)
+
+        for titulo in ['Enlace oculto', 'Carpeta oculta', 'Dentro de la oculta', 'Carpeta vacía',
+                       'Carpeta sin visibles', 'Oculto en carpeta']:
+            with self.subTest(titulo=titulo):
+                self.assertNotContains(respuesta, titulo)
+        self.assertContains(respuesta, 'Guías')
+        self.assertContains(respuesta, 'Guía visible')
+
+    def test_un_curso_ajeno_retirado_o_eliminado_responde_404(self):
+        ajeno = Curso.objects.create(nombre='Ajeno', profesor=self.profesor)
+        self.assertEqual(self.client.get(reverse('alumno_curso', args=[ajeno.pk])).status_code, 404)
+
+        eliminado = Curso.objects.create(nombre='Eliminado', profesor=self.profesor)
+        Inscripcion.objects.create(alumno=self.alumno, curso=eliminado)
+        eliminado.eliminar()
+        self.assertEqual(self.client.get(reverse('alumno_curso', args=[eliminado.pk])).status_code, 404)
+
+        self.inscripcion.activa = False
+        self.inscripcion.save()
+        self.assertEqual(self.client.get(self.url).status_code, 404)
+
+    def test_muestra_avisos_si_aun_no_hay_contenido(self):
+        self.assertContains(self.client.get(self.url), 'Sin material todavía')
+
+        Modulo.objects.create(curso=self.curso, nombre='Práctica')
+        self.assertContains(self.client.get(self.url), 'Este módulo aún no tiene clases')
+
+        vacio = Curso.objects.create(nombre='Vacío', profesor=self.profesor)
+        Inscripcion.objects.create(alumno=self.alumno, curso=vacio)
+        self.assertContains(self.client.get(reverse('alumno_curso', args=[vacio.pk])), 'aún no publica el contenido')
+
+    def test_mis_cursos_enlaza_a_la_pagina_del_curso(self):
+        respuesta = self.client.get(reverse('alumno_cursos'))
+
+        self.assertContains(respuesta, f'href="{self.url}"')
+        self.assertNotContains(respuesta, 'Próximamente')
+
+    def test_otros_roles_no_entran(self):
+        self.client.force_login(self.profesor)
+
+        self.assertEqual(self.client.get(self.url).status_code, 302)
+
+
 class PerfilAlumnoTests(TestCase):
     """RF-17: datos del alumno, sus capacitaciones y las funciones de su cuenta."""
 
@@ -883,7 +998,8 @@ class PerfilAlumnoTests(TestCase):
         self.assertContains(respuesta, 'ana@ejemplo.cl')
         self.assertContains(respuesta, '33333333-3')
         self.assertContains(respuesta, 'Mis capacitaciones')
-        self.assertContains(respuesta, '<td class="fw-semibold">Liderazgo</td>', html=True)
+        self.assertContains(respuesta, f'<a href="{reverse("alumno_curso", args=[self.curso.pk])}">Liderazgo</a>',
+                            html=True)
         self.assertContains(respuesta, '<span class="fw-bold">6,5</span>', html=True)
         self.assertNotContains(respuesta, 'parcial (')
 

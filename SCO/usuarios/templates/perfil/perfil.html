@@ -101,7 +101,7 @@
                                 <tbody>
                                     {% for resumen in capacitaciones %}
                                         <tr>
-                                            <td class="fw-semibold">{{ resumen.curso.nombre }}</td>
+                                            <td class="fw-semibold"><a href="{% url 'alumno_curso' resumen.curso.pk %}">{{ resumen.curso.nombre }}</a></td>
                                             <td>{{ resumen.curso.profesor.get_short_name }}</td>
                                             <td class="text-center">
                                                 {% if resumen.promedio is None %}

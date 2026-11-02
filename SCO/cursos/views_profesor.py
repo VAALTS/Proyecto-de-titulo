@@ -15,6 +15,7 @@ from usuarios.models import Rol
 from usuarios.views import profesor_required
 
 from .calendario import eventos_de_calendario
+from .contenido import organizar_material
 from .forms import AsistenciaForm, BloqueHorarioForm, ClaseForm, MaterialForm, ModuloForm
 from .models import BloqueHorario, Clase, Curso, Inscripcion, Material, Modulo
 
@@ -94,18 +95,6 @@ FORMULARIOS_CURSO = {
     'modalActividad': ('form_actividad', lambda curso: ActividadForm(curso, auto_id='actividad_%s')),
     'modalBloque': ('form_bloque', lambda curso: BloqueHorarioForm(curso, auto_id='bloque_%s')),
 }
-
-
-def organizar_material(modulos):
-    """Deja en cada clase su material de primer nivel (carpetas primero) y en cada carpeta su contenido."""
-    for modulo in modulos:
-        for clase in modulo.clases.all():
-            materiales = list(clase.materiales.all())
-            for material in materiales:
-                material.hijos = [hijo for hijo in materiales if hijo.carpeta_id == material.pk]
-            clase.raiz = sorted((m for m in materiales if m.carpeta_id is None),
-                                key=lambda m: (m.tipo != Material.Tipo.CARPETA, m.titulo.lower()))
-    return modulos
 
 
 def pagina_curso(request, curso, form=None, id_modal='', titulo_modal=''):

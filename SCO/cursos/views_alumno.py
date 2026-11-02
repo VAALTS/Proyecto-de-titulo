@@ -1,11 +1,14 @@
 """Vistas del alumno (fase 4: RF-13 a RF-17)."""
-from django.shortcuts import render
+from django.db.models import Prefetch
+from django.shortcuts import get_object_or_404, render
+from django.urls import reverse
 
 from evaluaciones.calculos import calificaciones_del_alumno
 from usuarios.views import alumno_required
 
 from .calendario import eventos_de_calendario
-from .models import BloqueHorario, Curso
+from .contenido import organizar_material
+from .models import BloqueHorario, Curso, Material
 
 # Accesos del menú del alumno (RF-13)
 SECCIONES_ALUMNO = [
@@ -35,10 +38,24 @@ def alumno_cursos_view(request):
 
 
 @alumno_required
+def alumno_curso_view(request, pk):
+    """RF-16: módulos, clases y material visible; un curso que no es suyo responde 404."""
+    curso = get_object_or_404(cursos_del_alumno(request.user), pk=pk)
+    modulos = organizar_material(list(curso.modulos.prefetch_related(
+        Prefetch('clases__materiales', queryset=Material.objects.filter(visible=True).order_by('titulo')))))
+    for modulo in modulos:
+        for clase in modulo.clases.all():
+            # Una carpeta sin nada visible no le sirve al alumno
+            clase.raiz = [m for m in clase.raiz if m.tipo != Material.Tipo.CARPETA or m.hijos]
+    return render(request, 'alumno/curso.html', {'curso': curso, 'modulos': modulos})
+
+
+@alumno_required
 def alumno_horario_view(request):
     """RF-14: calendario semanal con los bloques de los cursos del alumno."""
     bloques = BloqueHorario.objects.filter(curso__in=cursos_del_alumno(request.user)).select_related('curso')
-    return render(request, 'alumno/horario.html', {'eventos': eventos_de_calendario(bloques)})
+    eventos = eventos_de_calendario(bloques, lambda curso: reverse('alumno_curso', args=[curso.pk]))
+    return render(request, 'alumno/horario.html', {'eventos': eventos})
 
 
 @alumno_required

@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+
+{# RF-16: contenido del curso para el alumno: módulos, clases y material visible #}
+
+{% block title %}{{ curso.nombre }}{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="fw-bold mb-1"><i class="bi bi-journal-bookmark-fill text-primary me-2"></i>{{ curso.nombre }}</h2>
+        {% if curso.descripcion %}<p class="text-muted mb-1">{{ curso.descripcion }}</p>{% endif %}
+        <span class="small text-muted">
+            <i class="bi bi-person-workspace me-1"></i>{{ curso.profesor.get_short_name }}
+        </span>
+    </div>
+    <a href="{% url 'alumno_cursos' %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i>Mis cursos
+    </a>
+</div>
+
+{% for modulo in modulos %}
+    <div class="card shadow-sm border-0 mb-3">
+        <div class="card-header bg-white">
+            <h5 class="mb-0">
+                <span class="badge text-bg-primary me-1">{{ forloop.counter }}</span>{{ modulo.nombre }}
+            </h5>
+        </div>
+        <div class="card-body">
+            {% if modulo.clases.all %}
+                <ul class="list-group list-group-flush">
+                    {% for clase in modulo.clases.all %}
+                        <li class="list-group-item px-0">
+                            <div class="fw-semibold">{{ clase.titulo }}</div>
+                            <div class="small text-muted">
+                                <i class="bi bi-calendar-event me-1"></i>{{ clase.fecha|date:"l d/m/Y"|capfirst }}
+                                · {{ clase.hora_inicio|time:"H:i" }} a {{ clase.hora_fin|time:"H:i" }}
+                            </div>
+
+                            {# Material de la clase #}
+                            <div class="ms-md-4 mt-2 p-2 bg-light rounded">
+                                {% for material in clase.raiz %}
+                                    {% if material.tipo == 'carpeta' %}
+                                        <div class="py-1 text-break">
+                                            <i class="bi bi-folder-fill text-warning me-1"></i><span class="fw-semibold">{{ material.titulo }}</span>
+                                        </div>
+                                        {% for material in material.hijos %}
+                                            <div class="ms-4">{% include 'alumno/_material.html' %}</div>
+                                        {% endfor %}
+                                    {% else %}
+                                        {% include 'alumno/_material.html' %}
+                                    {% endif %}
+                                {% empty %}
+                                    <p class="small text-muted mb-0">Sin material todavía.</p>
+                                {% endfor %}
+                            </div>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="text-muted mb-0">Este módulo aún no tiene clases.</p>
+            {% endif %}
+        </div>
+    </div>
+{% empty %}
+    <div class="card shadow-sm border-0">
+        <div class="card-body text-center text-muted py-5">
+            Tu profesor aún no publica el contenido de este curso.
+        </div>
+    </div>
+{% endfor %}
+{% endblock %}

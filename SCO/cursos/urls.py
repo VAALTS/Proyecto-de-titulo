@@ -3,9 +3,10 @@ from django.urls import path
 from . import views, views_alumno, views_profesor
 
 urlpatterns = [
-    # Menú y cursos del alumno (RF-13)
+    # Menú y cursos del alumno (RF-13 y RF-16)
     path('alumno/', views_alumno.alumno_inicio_view, name='alumno_inicio'),
     path('alumno/cursos/', views_alumno.alumno_cursos_view, name='alumno_cursos'),
+    path('alumno/cursos/<int:pk>/', views_alumno.alumno_curso_view, name='alumno_curso'),
     path('alumno/horario/', views_alumno.alumno_horario_view, name='alumno_horario'),
     path('alumno/calificaciones/', views_alumno.alumno_calificaciones_view, name='alumno_calificaciones'),
 
@@ -40,7 +41,7 @@ urlpatterns = [
     path('profesor/cursos/<int:pk>/bloques/crear/', views_profesor.bloque_crear_view, name='bloque_crear'),
     path('profesor/bloques/<int:pk>/editar/', views_profesor.bloque_editar_view, name='bloque_editar'),
     path('profesor/bloques/<int:pk>/eliminar/', views_profesor.bloque_eliminar_view, name='bloque_eliminar'),
-    # Descarga protegida: la usan el profesor y, en la fase 4, los alumnos inscritos
+    # Descarga protegida: la usan el profesor y los alumnos inscritos
     path('material/<int:pk>/descargar/', views_profesor.material_descargar_view, name='material_descargar'),
 
     # Gestión de cursos del administrador (RF-06)

@@ -7,6 +7,7 @@ urlpatterns = [
     path('alumno/', views_alumno.alumno_inicio_view, name='alumno_inicio'),
     path('alumno/cursos/', views_alumno.alumno_cursos_view, name='alumno_cursos'),
     path('alumno/horario/', views_alumno.alumno_horario_view, name='alumno_horario'),
+    path('alumno/calificaciones/', views_alumno.alumno_calificaciones_view, name='alumno_calificaciones'),
 
     # Menú y cursos del profesor (RF-09 y RF-10)
     path('profesor/', views_profesor.profesor_inicio_view, name='profesor_inicio'),

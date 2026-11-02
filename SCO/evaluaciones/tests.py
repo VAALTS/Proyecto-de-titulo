@@ -316,3 +316,112 @@ class FormularioTests(EvaluacionesTestCase):
         self.assertEqual(self.crear_pregunta().status_code, 404)
         self.assertEqual(self.client.post(reverse('pregunta_eliminar', args=[pregunta.pk])).status_code, 404)
         self.assertTrue(Pregunta.objects.filter(pk=pregunta.pk).exists())
+
+
+class CalificacionesAlumnoTests(EvaluacionesTestCase):
+    """RF-15: notas agrupadas por curso y promedio ponderado, tal como en la planilla del profesor."""
+
+    def setUp(self):
+        super().setUp()
+        self.informe = self.crear_actividad('Informe', '40')
+        self.prueba = self.crear_actividad('Prueba', '60')
+        self.client.force_login(self.ana)
+
+    def notas(self, actividad, inscripcion, nota, observacion=''):
+        return Calificacion.objects.create(actividad=actividad, inscripcion=inscripcion, nota=Decimal(nota),
+                                           registrada_por=self.profesor, observacion=observacion)
+
+    def resumen(self):
+        return self.client.get(reverse('alumno_calificaciones')).context['cursos']
+
+    def test_muestra_cada_nota_con_su_observacion_y_el_promedio_ponderado(self):
+        self.notas(self.informe, self.ins_ana, '6.0', 'Buen análisis')
+        self.notas(self.prueba, self.ins_ana, '4.5')
+
+        respuesta = self.client.get(reverse('alumno_calificaciones'))
+
+        self.assertContains(respuesta, 'Liderazgo')
+        self.assertContains(respuesta, 'Buen análisis')
+        self.assertContains(respuesta, '<div class="fs-4 fw-bold">5,1</div>', html=True)
+        self.assertNotContains(respuesta, 'parcial (')
+
+    def test_con_notas_pendientes_el_promedio_es_parcial(self):
+        self.notas(self.informe, self.ins_ana, '6.0')
+
+        respuesta = self.client.get(reverse('alumno_calificaciones'))
+
+        self.assertEqual(respuesta.context['cursos'][0]['promedio'], Decimal('6.0'))
+        self.assertContains(respuesta, 'parcial (40 % evaluado)')
+        self.assertContains(respuesta, 'Prueba')
+
+    def test_sin_notas_no_hay_promedio(self):
+        self.assertIsNone(self.resumen()[0]['promedio'])
+
+    def test_el_promedio_cambia_apenas_el_profesor_corrige_una_nota(self):
+        calificacion = self.notas(self.informe, self.ins_ana, '3.0')
+        self.assertEqual(self.resumen()[0]['promedio'], Decimal('3.0'))
+
+        calificacion.nota = Decimal('5.0')
+        calificacion.save()
+
+        self.assertEqual(self.resumen()[0]['promedio'], Decimal('5.0'))
+
+    def test_la_actividad_oculta_solo_aparece_si_tiene_nota_y_el_promedio_coincide_con_el_del_profesor(self):
+        Actividad.objects.filter(pk=self.prueba.pk).update(visible=False)
+        self.notas(self.informe, self.ins_ana, '6.0')
+        self.assertEqual([fila['actividad'] for fila in self.resumen()[0]['filas']], [self.informe])
+
+        self.notas(self.prueba, self.ins_ana, '3.0')
+        resumen = self.resumen()[0]
+        self.assertEqual([fila['actividad'] for fila in resumen['filas']], [self.informe, self.prueba])
+
+        self.client.force_login(self.profesor)
+        planilla = self.client.get(reverse('profesor_curso', args=[self.curso.pk])).context['filas_notas']
+        fila_ana = next(fila for fila in planilla if fila['inscripcion'] == self.ins_ana)
+        self.assertEqual((resumen['promedio'], resumen['evaluado']), (fila_ana['promedio'], fila_ana['evaluado']))
+
+    def test_no_ve_las_notas_de_otros_alumnos(self):
+        self.notas(self.informe, self.ins_luis, '2.0', 'Comentario para Luis')
+
+        respuesta = self.client.get(reverse('alumno_calificaciones'))
+
+        self.assertIsNone(respuesta.context['cursos'][0]['promedio'])
+        self.assertNotContains(respuesta, 'Comentario para Luis')
+
+    def test_agrupa_por_curso_en_orden_y_sin_retirados_ni_eliminados(self):
+        excel = Curso.objects.create(nombre='Excel', profesor=self.profesor)
+        modulo = Modulo.objects.create(curso=excel, nombre='Tablas')
+        clase = Clase.objects.create(modulo=modulo, titulo='Fórmulas', fecha=timezone.localdate(),
+                                     hora_inicio='09:00', hora_fin='10:30')
+        tarea = Actividad.objects.create(clase=clase, titulo='Tarea', ponderacion=Decimal('100'),
+                                         fecha_limite=timezone.now())
+        ins_excel = Inscripcion.objects.create(alumno=self.ana, curso=excel)
+        self.notas(tarea, ins_excel, '7.0')
+        self.notas(self.informe, self.ins_ana, '5.0')
+        retirado = Curso.objects.create(nombre='Retirado', profesor=self.profesor)
+        Inscripcion.objects.create(alumno=self.ana, curso=retirado, activa=False)
+        eliminado = Curso.objects.create(nombre='Eliminado', profesor=self.profesor)
+        Inscripcion.objects.create(alumno=self.ana, curso=eliminado)
+        eliminado.eliminar()
+
+        resumen = self.resumen()
+
+        self.assertEqual([(r['curso'].nombre, r['promedio']) for r in resumen],
+                         [('Excel', Decimal('7.0')), ('Liderazgo', Decimal('5.0'))])
+
+    def test_curso_sin_actividades_y_alumno_sin_cursos_muestran_un_aviso(self):
+        Calificacion.objects.all().delete()
+        Actividad.objects.all().delete()
+        self.assertContains(self.client.get(reverse('alumno_calificaciones')), 'Este curso aún no tiene actividades')
+
+        self.ins_ana.activa = False
+        self.ins_ana.save()
+        self.assertContains(self.client.get(reverse('alumno_calificaciones')), 'Aún no estás inscrito')
+
+    def test_el_menu_enlaza_a_las_calificaciones_y_otro_rol_no_entra(self):
+        respuesta = self.client.get(reverse('alumno_inicio'))
+        self.assertContains(respuesta, f'href="{reverse("alumno_calificaciones")}"')
+        self.assertNotContains(respuesta, 'Próximamente')
+
+        self.client.force_login(self.profesor)
+        self.assertEqual(self.client.get(reverse('alumno_calificaciones')).status_code, 302)

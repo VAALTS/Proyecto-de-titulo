@@ -1,8 +1,14 @@
+import os
+import shutil
+import tempfile
 from datetime import timedelta
 from decimal import Decimal
+from unittest import mock
 
+from django.conf import settings
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -10,7 +16,7 @@ from cursos.models import Clase, Curso, Inscripcion, Modulo
 from usuarios.models import Rol, Usuario
 
 from .calculos import promedio_ponderado
-from .models import Actividad, Alternativa, Calificacion, Pregunta
+from .models import Actividad, Alternativa, Calificacion, Entrega, Pregunta
 
 
 def crear_usuario(email, rut, nombre, rol):
@@ -425,3 +431,229 @@ class CalificacionesAlumnoTests(EvaluacionesTestCase):
 
         self.client.force_login(self.profesor)
         self.assertEqual(self.client.get(reverse('alumno_calificaciones')).status_code, 302)
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix='adapt_media_'))
+class EntregaTests(EvaluacionesTestCase):
+    """RF-16: el alumno entrega un archivo hasta la fecha límite y el profesor lo descarga desde la planilla."""
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(settings.MEDIA_ROOT, ignore_errors=True)
+        super().tearDownClass()
+
+    def setUp(self):
+        super().setUp()
+        self.actividad = self.crear_actividad()
+        self.url = reverse('alumno_actividad', args=[self.actividad.pk])
+        self.client.force_login(self.ana)
+
+    def entregar(self, nombre='informe.pdf', contenido=b'%PDF-1.4 prueba'):
+        return self.client.post(self.url, {'archivo': SimpleUploadedFile(nombre, contenido)})
+
+    def vencer(self):
+        Actividad.objects.filter(pk=self.actividad.pk).update(fecha_limite=timezone.now() - timedelta(minutes=1))
+
+    def calificar_a_ana(self, nota='6.0', observacion=''):
+        return Calificacion.objects.create(actividad=self.actividad, inscripcion=self.ins_ana, nota=Decimal(nota),
+                                           registrada_por=self.profesor, observacion=observacion)
+
+    def test_la_pagina_del_curso_lista_las_actividades_visibles_con_su_estado(self):
+        oculta = self.crear_actividad('Oculta', '10')
+        Actividad.objects.filter(pk=oculta.pk).update(visible=False)
+        vencida = self.crear_actividad('Vencida', '10')
+        Actividad.objects.filter(pk=vencida.pk).update(fecha_limite=timezone.now() - timedelta(days=1))
+
+        respuesta = self.client.get(reverse('alumno_curso', args=[self.curso.pk]))
+
+        self.assertEqual([a.titulo for a in respuesta.context['actividades']], ['Vencida', 'Informe'])
+        self.assertContains(respuesta, f'href="{self.url}"')
+        self.assertContains(respuesta, 'Sin entrega')
+        self.assertContains(respuesta, 'Pendiente')
+        self.assertNotContains(respuesta, 'Oculta')
+
+    def test_el_estado_cambia_al_entregar_y_al_calificar(self):
+        self.entregar()
+        pagina = reverse('alumno_curso', args=[self.curso.pk])
+        self.assertContains(self.client.get(pagina), 'Entregada')
+
+        self.calificar_a_ana('6.5')
+
+        respuesta = self.client.get(pagina)
+        self.assertContains(respuesta, 'Calificada')
+        self.assertContains(respuesta, '6,5')
+
+    def test_la_actividad_muestra_las_instrucciones_y_la_nota(self):
+        Actividad.objects.filter(pk=self.actividad.pk).update(descripcion='Lee el capítulo 1')
+        self.calificar_a_ana('3.5', 'Faltó la conclusión')
+
+        respuesta = self.client.get(self.url)
+
+        self.assertContains(respuesta, 'Lee el capítulo 1')
+        self.assertContains(respuesta, 'Faltó la conclusión')
+        self.assertContains(respuesta, '<div class="fs-4 fw-bold text-danger">3,5</div>', html=True)
+
+    def test_entregar_un_archivo(self):
+        respuesta = self.entregar()
+
+        self.assertRedirects(respuesta, self.url, fetch_redirect_response=False)
+        entrega = Entrega.objects.get()
+        self.assertEqual((entrega.actividad, entrega.inscripcion, entrega.nombre_archivo),
+                         (self.actividad, self.ins_ana, 'informe.pdf'))
+        self.assertTrue(os.path.exists(entrega.archivo.path))
+        pagina = self.client.get(self.url)
+        self.assertContains(pagina, 'Tu entrega se guardó')
+        self.assertContains(pagina, 'Reemplazar entrega')
+
+    def test_reemplazar_la_entrega_borra_el_archivo_anterior(self):
+        self.entregar('primero.pdf')
+        anterior = Entrega.objects.get()
+        Entrega.objects.filter(pk=anterior.pk).update(fecha_entrega=timezone.now() - timedelta(days=1))
+
+        self.entregar('segundo.pdf')
+
+        entrega = Entrega.objects.get()
+        self.assertEqual(entrega.nombre_archivo, 'segundo.pdf')
+        self.assertGreater(entrega.fecha_entrega, timezone.now() - timedelta(minutes=1))
+        self.assertFalse(os.path.exists(anterior.archivo.path))
+        self.assertTrue(os.path.exists(entrega.archivo.path))
+
+    def test_despues_de_la_fecha_limite_no_se_entrega_ni_se_reemplaza(self):
+        self.entregar('primero.pdf')
+        self.vencer()
+
+        respuesta = self.entregar('segundo.pdf')
+
+        self.assertRedirects(respuesta, self.url, fetch_redirect_response=False)
+        self.assertEqual(Entrega.objects.get().nombre_archivo, 'primero.pdf')
+        pagina = self.client.get(self.url)
+        self.assertContains(pagina, 'ya no recibe entregas')
+        self.assertContains(pagina, 'El plazo de entrega ya terminó')
+        self.assertNotContains(pagina, 'type="file"')
+
+    def test_despues_de_la_fecha_limite_sin_entrega_se_informa(self):
+        self.vencer()
+
+        self.entregar()
+
+        self.assertFalse(Entrega.objects.exists())
+        self.assertContains(self.client.get(self.url), 'No registras una entrega')
+
+    def test_una_actividad_calificada_no_acepta_cambios_en_la_entrega(self):
+        self.entregar('primero.pdf')
+        self.calificar_a_ana()
+
+        self.entregar('segundo.pdf')
+
+        self.assertEqual(Entrega.objects.get().nombre_archivo, 'primero.pdf')
+        self.assertContains(self.client.get(self.url), 'ya fue calificada')
+
+    def test_rechaza_formatos_no_permitidos_y_archivos_muy_pesados(self):
+        self.assertContains(self.entregar('virus.exe'), 'exe')
+        with mock.patch('cursos.forms.TAMANO_MAXIMO_MB', 0.001):
+            self.assertContains(self.entregar(contenido=b'x' * 2048), 'pesa más de')
+        self.assertFalse(Entrega.objects.exists())
+
+    def test_sin_archivo_lo_pide_y_no_toca_la_entrega_anterior(self):
+        self.entregar()
+        fecha = Entrega.objects.get().fecha_entrega
+
+        respuesta = self.client.post(self.url, {})
+
+        self.assertContains(respuesta, 'Selecciona el archivo')
+        self.assertEqual(Entrega.objects.get().fecha_entrega, fecha)
+
+    def test_un_formulario_en_linea_no_recibe_archivos(self):
+        Actividad.objects.filter(pk=self.actividad.pk).update(tipo=Actividad.Tipo.FORMULARIO)
+
+        self.entregar()
+
+        self.assertFalse(Entrega.objects.exists())
+
+    def test_una_actividad_oculta_o_ajena_responde_404(self):
+        Actividad.objects.filter(pk=self.actividad.pk).update(visible=False)
+        self.assertEqual(self.client.get(self.url).status_code, 404)
+        self.assertEqual(self.entregar().status_code, 404)
+
+        Actividad.objects.filter(pk=self.actividad.pk).update(visible=True)
+        self.ins_ana.activa = False
+        self.ins_ana.save()
+        self.assertEqual(self.client.get(self.url).status_code, 404)
+        self.assertEqual(self.entregar().status_code, 404)
+
+        ajeno = Curso.objects.create(nombre='Ajeno', profesor=self.profesor)
+        modulo = Modulo.objects.create(curso=ajeno, nombre='Tablas')
+        clase = Clase.objects.create(modulo=modulo, titulo='Fórmulas', fecha=timezone.localdate(),
+                                     hora_inicio='09:00', hora_fin='10:30')
+        otra = Actividad.objects.create(clase=clase, titulo='Tarea', ponderacion=Decimal('10'),
+                                        fecha_limite=timezone.now() + timedelta(days=1))
+        self.assertEqual(self.client.get(reverse('alumno_actividad', args=[otra.pk])).status_code, 404)
+        self.assertFalse(Entrega.objects.exists())
+
+    def test_solo_el_alumno_y_su_profesor_descargan_la_entrega(self):
+        self.entregar()
+        descargar = reverse('entrega_descargar', args=[Entrega.objects.get().pk])
+
+        respuesta = self.client.get(descargar)
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertIn('informe.pdf', respuesta['Content-Disposition'])
+        self.client.force_login(self.profesor)
+        self.assertEqual(self.client.get(descargar).status_code, 200)
+
+        admin = Usuario.objects.create_superuser('admin@ejemplo.cl', 'clave-segura-123', primer_nombre='Admin')
+        otro_profesor = crear_usuario('marta@ejemplo.cl', '44444444-4', 'Marta', Rol.PROFESOR)
+        for usuario in [self.luis, otro_profesor, admin]:
+            self.client.force_login(usuario)
+            with self.subTest(usuario=usuario.email):
+                self.assertEqual(self.client.get(descargar).status_code, 404)
+        self.client.logout()
+        self.assertEqual(self.client.get(descargar).status_code, 302)
+
+    def test_ocultar_la_actividad_o_retirar_al_alumno_le_quita_la_descarga(self):
+        self.entregar()
+        descargar = reverse('entrega_descargar', args=[Entrega.objects.get().pk])
+
+        Actividad.objects.filter(pk=self.actividad.pk).update(visible=False)
+        self.assertEqual(self.client.get(descargar).status_code, 404)
+        Actividad.objects.filter(pk=self.actividad.pk).update(visible=True)
+        self.ins_ana.activa = False
+        self.ins_ana.save()
+        self.assertEqual(self.client.get(descargar).status_code, 404)
+
+        self.client.force_login(self.profesor)
+        self.assertEqual(self.client.get(descargar).status_code, 200)
+
+    def test_la_planilla_del_profesor_muestra_quien_entrego(self):
+        self.entregar()
+        entrega = Entrega.objects.get()
+        self.client.force_login(self.profesor)
+
+        respuesta = self.client.get(reverse('actividad_calificar', args=[self.actividad.pk]))
+
+        self.assertContains(respuesta, f'href="{reverse("entrega_descargar", args=[entrega.pk])}"', count=1)
+        self.assertContains(respuesta, 'Sin entrega', count=1)
+
+    def test_una_actividad_con_entregas_no_se_elimina_ni_cambia_de_tipo(self):
+        self.entregar()
+        self.client.force_login(self.profesor)
+
+        respuesta = self.client.post(reverse('actividad_eliminar', args=[self.actividad.pk]), follow=True)
+        self.assertContains(respuesta, 'ya tiene entregas de alumnos')
+        self.assertTrue(Actividad.objects.filter(pk=self.actividad.pk).exists())
+
+        respuesta = self.client.post(reverse('actividad_editar', args=[self.actividad.pk]),
+                                     self.datos_actividad(tipo='formulario'))
+        self.assertContains(respuesta, 'no se puede cambiar el tipo')
+        self.actividad.refresh_from_db()
+        self.assertEqual(self.actividad.tipo, Actividad.Tipo.ARCHIVO)
+
+    def test_la_base_de_datos_rechaza_dos_entregas_del_mismo_alumno(self):
+        Entrega.objects.create(actividad=self.actividad, inscripcion=self.ins_ana)
+
+        with self.assertRaises(IntegrityError):
+            Entrega.objects.create(actividad=self.actividad, inscripcion=self.ins_ana)
+
+    def test_otro_rol_no_entra(self):
+        self.client.force_login(self.profesor)
+
+        self.assertEqual(self.client.get(self.url).status_code, 302)

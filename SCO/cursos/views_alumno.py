@@ -3,12 +3,12 @@ from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 
-from evaluaciones.calculos import calificaciones_del_alumno
+from evaluaciones.calculos import actividades_del_alumno, calificaciones_del_alumno
 from usuarios.views import alumno_required
 
 from .calendario import eventos_de_calendario
 from .contenido import organizar_material
-from .models import BloqueHorario, Curso, Material
+from .models import BloqueHorario, Curso, Inscripcion, Material
 
 # Accesos del menú del alumno (RF-13)
 SECCIONES_ALUMNO = [
@@ -39,15 +39,19 @@ def alumno_cursos_view(request):
 
 @alumno_required
 def alumno_curso_view(request, pk):
-    """RF-16: módulos, clases y material visible; un curso que no es suyo responde 404."""
-    curso = get_object_or_404(cursos_del_alumno(request.user), pk=pk)
+    """RF-16: módulos, clases, material visible y actividades; un curso que no es suyo responde 404."""
+    inscripcion = get_object_or_404(Inscripcion.objects.select_related('curso__profesor'), curso_id=pk,
+                                    alumno=request.user, activa=True, curso__activo=True)
+    curso = inscripcion.curso
     modulos = organizar_material(list(curso.modulos.prefetch_related(
         Prefetch('clases__materiales', queryset=Material.objects.filter(visible=True).order_by('titulo')))))
     for modulo in modulos:
         for clase in modulo.clases.all():
             # Una carpeta sin nada visible no le sirve al alumno
             clase.raiz = [m for m in clase.raiz if m.tipo != Material.Tipo.CARPETA or m.hijos]
-    return render(request, 'alumno/curso.html', {'curso': curso, 'modulos': modulos})
+    return render(request, 'alumno/curso.html', {
+        'curso': curso, 'modulos': modulos, 'actividades': actividades_del_alumno(inscripcion),
+    })
 
 
 @alumno_required

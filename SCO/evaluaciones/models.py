@@ -1,8 +1,11 @@
+import os
+import uuid
 from decimal import Decimal
 
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.utils import timezone
 
 from cursos.models import Clase, Inscripcion
 
@@ -43,6 +46,11 @@ class Actividad(models.Model):
     @property
     def curso(self):
         return self.clase.modulo.curso
+
+    @property
+    def abierta(self):
+        """Los alumnos pueden entregar hasta la fecha límite."""
+        return timezone.now() <= self.fecha_limite
 
 
 class Pregunta(models.Model):
@@ -92,6 +100,36 @@ class Alternativa(models.Model):
 
     def __str__(self):
         return self.texto
+
+
+def ruta_entrega(entrega, nombre_archivo):
+    # Una carpeta al azar por archivo evita choques de nombres y conserva el nombre original
+    return f'entregas/curso_{entrega.actividad.clase.modulo.curso_id}/{uuid.uuid4().hex}/{nombre_archivo}'
+
+
+class Entrega(models.Model):
+    """Entrega de un alumno en una actividad (RF-16); hay una por alumno y actividad."""
+
+    actividad = models.ForeignKey(Actividad, on_delete=models.PROTECT, related_name='entregas')
+    inscripcion = models.ForeignKey(Inscripcion, on_delete=models.PROTECT, related_name='entregas')
+    # Solo en actividades de tipo archivo
+    archivo = models.FileField(upload_to=ruta_entrega, max_length=255, null=True, blank=True)
+    # Reemplazar el archivo actualiza la fecha
+    fecha_entrega = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'entrega'
+        verbose_name_plural = 'entregas'
+        constraints = [
+            models.UniqueConstraint(fields=['actividad', 'inscripcion'], name='entrega_unica_por_actividad'),
+        ]
+
+    def __str__(self):
+        return f'{self.inscripcion.alumno}: {self.actividad}'
+
+    @property
+    def nombre_archivo(self):
+        return os.path.basename(self.archivo.name) if self.archivo else ''
 
 
 class Calificacion(models.Model):

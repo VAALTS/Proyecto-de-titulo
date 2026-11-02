@@ -111,6 +111,11 @@ EXTENSIONES_PERMITIDAS = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 't
                           'gif', 'zip']
 
 
+def validar_tamano(archivo):
+    if archivo.size > TAMANO_MAXIMO_MB * 1024 * 1024:
+        raise forms.ValidationError(f'El archivo pesa más de {TAMANO_MAXIMO_MB} MB.')
+
+
 class MaterialForm(EstiloBootstrapMixin, forms.ModelForm):
     """RF-10: archivo, enlace o carpeta de una clase. El tipo no cambia al editar."""
 
@@ -126,19 +131,13 @@ class MaterialForm(EstiloBootstrapMixin, forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields['archivo'].validators.append(FileExtensionValidator(EXTENSIONES_PERMITIDAS))
+        self.fields['archivo'].validators.extend([FileExtensionValidator(EXTENSIONES_PERMITIDAS), validar_tamano])
         if self.instance.pk:
             self.fields['tipo'].disabled = True
         elif self.instance.carpeta_id:
             # Las carpetas tienen un solo nivel
             self.fields['tipo'].choices = [opcion for opcion in Material.Tipo.choices
                                            if opcion[0] != Material.Tipo.CARPETA]
-
-    def clean_archivo(self):
-        archivo = self.cleaned_data.get('archivo')
-        if archivo and archivo.size > TAMANO_MAXIMO_MB * 1024 * 1024:
-            raise forms.ValidationError(f'El archivo pesa más de {TAMANO_MAXIMO_MB} MB.')
-        return archivo
 
     def clean(self):
         datos = super().clean()

@@ -69,3 +69,15 @@ def calificaciones_del_alumno(alumno):
             (fila['calificacion'].nota, fila['actividad'].ponderacion) for fila in filas if fila['calificacion'])
         resumen.append({'curso': inscripcion.curso, 'filas': filas, 'promedio': promedio, 'evaluado': evaluado})
     return resumen
+
+
+def actividades_del_alumno(inscripcion):
+    """Actividades visibles del curso, cada una con la entrega y la nota de este alumno (RF-16)."""
+    actividades = list(Actividad.objects.filter(clase__modulo__curso=inscripcion.curso_id, visible=True)
+                       .select_related('clase').order_by('fecha_limite', 'titulo'))
+    entregas = {entrega.actividad_id: entrega for entrega in inscripcion.entregas.all()}
+    calificaciones = {calificacion.actividad_id: calificacion for calificacion in inscripcion.calificaciones.all()}
+    for actividad in actividades:
+        actividad.entrega = entregas.get(actividad.pk)
+        actividad.calificacion = calificaciones.get(actividad.pk)
+    return actividades

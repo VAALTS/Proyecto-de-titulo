@@ -1,16 +1,18 @@
 """Actividades y calificaciones del profesor (RF-11)."""
 from django.contrib import messages
+from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.db.models import Count, ProtectedError, Q, Sum
-from django.http import Http404
+from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from cursos.views_profesor import curso_propio, cursos_del_profesor, pagina_curso, volver_al_curso
+from usuarios.models import Rol
 from usuarios.views import profesor_required
 
 from .forms import ActividadForm, CalificacionesForm, PreguntaForm, porcentaje
-from .models import Actividad, Pregunta
+from .models import Actividad, Entrega, Pregunta
 
 
 def actividad_propia(request, pk):
@@ -64,8 +66,12 @@ def actividad_eliminar_view(request, pk):
     try:
         actividad.delete()
     except ProtectedError:
-        messages.error(request, f'«{actividad.titulo}» ya tiene calificaciones. Bórrelas en la planilla de notas '
-                                f'para poder eliminarla.')
+        if actividad.entregas.exists():
+            messages.error(request, f'«{actividad.titulo}» ya tiene entregas de alumnos, así que no se puede '
+                                    f'eliminar. Si ya no la usa, ocúltela.')
+        else:
+            messages.error(request, f'«{actividad.titulo}» ya tiene calificaciones. Bórrelas en la planilla de notas '
+                                    f'para poder eliminarla.')
     else:
         messages.success(request, f'Se eliminó la actividad «{actividad.titulo}».')
     return volver_al_curso(actividad.curso, 'actividades')
@@ -105,6 +111,32 @@ def profesor_evaluaciones_view(request):
     return render(request, 'evaluaciones/evaluaciones.html', {
         'cursos': cursos, 'actividades': actividades, 'curso_elegido': curso_elegido,
     })
+
+
+# ---------- Entregas ----------
+
+def puede_descargar_entrega(usuario, entrega):
+    curso = entrega.actividad.curso
+    if not curso.activo:
+        return False
+    if usuario.rol == Rol.PROFESOR:
+        return curso.profesor_id == usuario.pk
+    # Alumno: la suya, mientras siga inscrito y la actividad esté visible
+    return (entrega.inscripcion.alumno_id == usuario.pk and entrega.inscripcion.activa
+            and entrega.actividad.visible)
+
+
+@login_required
+def entrega_descargar_view(request, pk):
+    """Los archivos no tienen dirección pública: solo los descargan su alumno y el profesor (404 al resto)."""
+    entrega = get_object_or_404(Entrega.objects.select_related('actividad__clase__modulo__curso', 'inscripcion'),
+                                pk=pk)
+    if not puede_descargar_entrega(request.user, entrega) or not entrega.archivo:
+        raise Http404
+    try:
+        return FileResponse(entrega.archivo.open('rb'), as_attachment=True, filename=entrega.nombre_archivo)
+    except FileNotFoundError:
+        raise Http404
 
 
 # ---------- Formularios en línea: preguntas de una actividad ----------

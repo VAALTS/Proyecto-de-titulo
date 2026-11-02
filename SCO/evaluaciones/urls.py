@@ -1,8 +1,13 @@
 from django.urls import path
 
-from . import views
+from . import views, views_alumno
 
 urlpatterns = [
+    # Actividades y entregas del alumno (RF-16)
+    path('alumno/actividades/<int:pk>/', views_alumno.alumno_actividad_view, name='alumno_actividad'),
+    # Descarga protegida: la usan el alumno que entregó y el profesor del curso
+    path('entregas/<int:pk>/descargar/', views.entrega_descargar_view, name='entrega_descargar'),
+
     # Actividades y calificaciones del profesor (RF-11)
     path('profesor/evaluaciones/', views.profesor_evaluaciones_view, name='profesor_evaluaciones'),
     path('profesor/cursos/<int:pk>/actividades/crear/', views.actividad_crear_view, name='actividad_crear'),

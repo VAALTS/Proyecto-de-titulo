@@ -1,0 +1,10 @@
+{# Estado de una actividad para el alumno; recibe actividad, entrega y calificacion #}
+{% if calificacion %}
+    <span class="badge text-bg-success">Calificada</span>
+{% elif entrega %}
+    <span class="badge text-bg-primary">Entregada</span>
+{% elif actividad.abierta %}
+    <span class="badge text-bg-warning">Pendiente</span>
+{% else %}
+    <span class="badge text-bg-secondary">Sin entrega</span>
+{% endif %}

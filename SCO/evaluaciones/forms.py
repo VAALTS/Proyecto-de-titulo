@@ -1,13 +1,15 @@
 from decimal import Decimal
 
 from django import forms
+from django.core.validators import FileExtensionValidator
 from django.db import transaction
 from django.db.models import Sum
 
+from cursos.forms import EXTENSIONES_PERMITIDAS, TAMANO_MAXIMO_MB, validar_tamano
 from cursos.models import Clase
 from usuarios.forms import EstiloBootstrapMixin
 
-from .models import NOTA_MAXIMA, NOTA_MINIMA, Actividad, Alternativa, Calificacion, Pregunta
+from .models import NOTA_MAXIMA, NOTA_MINIMA, Actividad, Alternativa, Calificacion, Entrega, Pregunta
 
 
 def porcentaje(valor):
@@ -57,6 +59,8 @@ class ActividadForm(EstiloBootstrapMixin, forms.ModelForm):
         if (self.instance.pk and datos.get('tipo') == Actividad.Tipo.ARCHIVO
                 and self.instance.preguntas.exists()):
             self.add_error('tipo', 'Esta actividad tiene preguntas. Elimínelas antes de cambiar el tipo.')
+        if self.instance.pk and 'tipo' in self.changed_data and self.instance.entregas.exists():
+            self.add_error('tipo', 'Esta actividad ya tiene entregas, así que no se puede cambiar el tipo.')
         return datos
 
 
@@ -81,13 +85,14 @@ class NotaField(forms.DecimalField):
 
 
 class CalificacionesForm(forms.Form):
-    """Planilla de notas de una actividad: una nota y una observación por alumno inscrito."""
+    """Planilla de notas de una actividad: una nota y una observación por alumno inscrito, junto a su entrega."""
 
     def __init__(self, actividad, inscripciones, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.actividad = actividad
         self.inscripciones = list(inscripciones)
         registradas = {c.inscripcion_id: c for c in actividad.calificaciones.all()}
+        self.entregas = {e.inscripcion_id: e for e in actividad.entregas.all()}
         for inscripcion in self.inscripciones:
             actual = registradas.get(inscripcion.pk)
             self.fields[f'nota_{inscripcion.pk}'] = NotaField(
@@ -99,7 +104,8 @@ class CalificacionesForm(forms.Form):
                 widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Opcional'}))
 
     def filas(self):
-        return [(inscripcion, self[f'nota_{inscripcion.pk}'], self[f'observacion_{inscripcion.pk}'])
+        return [(inscripcion, self[f'nota_{inscripcion.pk}'], self[f'observacion_{inscripcion.pk}'],
+                 self.entregas.get(inscripcion.pk))
                 for inscripcion in self.inscripciones]
 
     def clean(self):
@@ -126,6 +132,27 @@ class CalificacionesForm(forms.Form):
             )
             calificadas += 1
         return calificadas
+
+
+class EntregaForm(EstiloBootstrapMixin, forms.Form):
+    """RF-16: archivo que entrega el alumno, con los mismos límites del material del profesor."""
+
+    archivo = forms.FileField(
+        label='Archivo', max_length=255, widget=forms.FileInput,
+        validators=[FileExtensionValidator(EXTENSIONES_PERMITIDAS), validar_tamano],
+        error_messages={'required': 'Selecciona el archivo que quieres entregar.'},
+        help_text=f'Hasta {TAMANO_MAXIMO_MB} MB. Formatos: {", ".join(EXTENSIONES_PERMITIDAS)}.')
+
+    def save(self, actividad, inscripcion):
+        """Guarda la entrega; si ya había una, el archivo nuevo reemplaza al anterior, que se borra del servidor."""
+        entrega = (Entrega.objects.filter(actividad=actividad, inscripcion=inscripcion).first()
+                   or Entrega(actividad=actividad, inscripcion=inscripcion))
+        anterior = entrega.archivo.name
+        entrega.archivo = self.cleaned_data['archivo']
+        entrega.save()
+        if anterior:
+            entrega.archivo.storage.delete(anterior)
+        return entrega
 
 
 MINIMO_ALTERNATIVAS = 2

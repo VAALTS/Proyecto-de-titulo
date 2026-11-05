@@ -5,10 +5,38 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Adapt Academy{% endblock %}</title>
+    <script>
+        // Modo día/noche: se aplica antes de cargar los estilos para que la página no parpadee
+        (() => {
+            let tema = null;
+            try { tema = localStorage.getItem('tema'); } catch (e) {}
+            if (tema !== 'light' && tema !== 'dark') {
+                tema = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            }
+            document.documentElement.setAttribute('data-bs-theme', tema);
+        })();
+    </script>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
     <style>
         body { background-color: #f4f6fb; }
+        [data-bs-theme="dark"] body { background-color: #12151c; }
+        /* Clases de color fijo usadas en las plantillas, adaptadas al modo noche */
+        [data-bs-theme="dark"] .bg-white { background-color: var(--bs-body-bg) !important; }
+        [data-bs-theme="dark"] .bg-light { background-color: var(--bs-tertiary-bg) !important; }
+        [data-bs-theme="dark"] .text-bg-light {
+            background-color: var(--bs-secondary-bg) !important;
+            color: var(--bs-body-color) !important;
+        }
+        [data-bs-theme="dark"] .table-light {
+            --bs-table-bg: var(--bs-tertiary-bg);
+            --bs-table-color: var(--bs-body-color);
+            --bs-table-border-color: var(--bs-border-color);
+        }
+        [data-bs-theme="dark"] .menu-card:not(.deshabilitada):hover {
+            box-shadow: 0 .75rem 1.5rem rgba(0, 0, 0, .5);
+        }
+        .btn-tema { width: 2.25rem; }
         .navbar-principal { background: linear-gradient(135deg, #2e6cc1, #c8232a, #f65b47, #e9cf22); }
         /* Tarjetas de los menús de cada rol */
         .menu-card {
@@ -32,6 +60,13 @@
             <a class="navbar-brand fw-bold" href="{% url 'home' %}">
                 <img src="{% static 'images/logo_adapt_blanco.png' %}" class="img-fluid" alt="LogoAdaptPNG" style="max-height: 70px;" >
             </a>
+
+            <div class="d-flex align-items-center gap-2">
+            {# Botón de modo día/noche #}
+            <button class="btn btn-outline-light btn-sm btn-tema" type="button" id="botonTema"
+                    title="Cambiar a modo noche" aria-label="Cambiar a modo noche">
+                <i class="bi bi-moon-stars-fill"></i>
+            </button>
 
             {# RF-02: menú de usuario con el cierre de sesión, arriba a la derecha en todas las páginas #}
             <div class="dropdown">
@@ -61,6 +96,7 @@
                         </form>
                     </li>
                 </ul>
+            </div>
             </div>
         </div>
     </nav>
@@ -94,6 +130,31 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Modo día/noche: alterna el tema de Bootstrap y lo recuerda en el navegador
+        (() => {
+            const boton = document.getElementById('botonTema');
+            if (!boton) return;
+            const raiz = document.documentElement;
+
+            const pintarBoton = (tema) => {
+                const oscuro = tema === 'dark';
+                const texto = oscuro ? 'Cambiar a modo día' : 'Cambiar a modo noche';
+                boton.innerHTML = oscuro ? '<i class="bi bi-sun-fill"></i>' : '<i class="bi bi-moon-stars-fill"></i>';
+                boton.title = texto;
+                boton.setAttribute('aria-label', texto);
+            };
+
+            pintarBoton(raiz.getAttribute('data-bs-theme'));
+
+            boton.addEventListener('click', () => {
+                const nuevo = raiz.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark';
+                raiz.setAttribute('data-bs-theme', nuevo);
+                try { localStorage.setItem('tema', nuevo); } catch (e) {}
+                pintarBoton(nuevo);
+            });
+        })();
+    </script>
     <script>
         (() => {
             const elemento = document.getElementById('modalConfirmacion');

@@ -1,16 +1,18 @@
 """Actividades y calificaciones del profesor (RF-11)."""
 from django.contrib import messages
+from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.db.models import Count, ProtectedError, Q, Sum
-from django.http import Http404
+from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from cursos.views_profesor import curso_propio, cursos_del_profesor, pagina_curso, volver_al_curso
+from usuarios.models import Rol
 from usuarios.views import profesor_required
 
-from .forms import ActividadForm, CalificacionesForm, PreguntaForm, porcentaje
-from .models import Actividad, Pregunta
+from .forms import ActividadForm, CalificacionesForm, CorreccionForm, PreguntaForm, porcentaje
+from .models import Actividad, Calificacion, Entrega, Pregunta
 
 
 def actividad_propia(request, pk):
@@ -64,8 +66,12 @@ def actividad_eliminar_view(request, pk):
     try:
         actividad.delete()
     except ProtectedError:
-        messages.error(request, f'«{actividad.titulo}» ya tiene calificaciones. Bórrelas en la planilla de notas '
-                                f'para poder eliminarla.')
+        if actividad.entregas.exists():
+            messages.error(request, f'«{actividad.titulo}» ya tiene entregas de alumnos, así que no se puede '
+                                    f'eliminar. Si ya no la usa, ocúltela.')
+        else:
+            messages.error(request, f'«{actividad.titulo}» ya tiene calificaciones. Bórrelas en la planilla de notas '
+                                    f'para poder eliminarla.')
     else:
         messages.success(request, f'Se eliminó la actividad «{actividad.titulo}».')
     return volver_al_curso(actividad.curso, 'actividades')
@@ -107,6 +113,57 @@ def profesor_evaluaciones_view(request):
     })
 
 
+# ---------- Entregas ----------
+
+def puede_descargar_entrega(usuario, entrega):
+    curso = entrega.actividad.curso
+    if not curso.activo:
+        return False
+    if usuario.rol == Rol.PROFESOR:
+        return curso.profesor_id == usuario.pk
+    # Alumno: la suya, mientras siga inscrito y la actividad esté visible
+    return (entrega.inscripcion.alumno_id == usuario.pk and entrega.inscripcion.activa
+            and entrega.actividad.visible)
+
+
+@login_required
+def entrega_descargar_view(request, pk):
+    """Los archivos no tienen dirección pública: solo los descargan su alumno y el profesor (404 al resto)."""
+    entrega = get_object_or_404(Entrega.objects.select_related('actividad__clase__modulo__curso', 'inscripcion'),
+                                pk=pk)
+    if not puede_descargar_entrega(request.user, entrega) or not entrega.archivo:
+        raise Http404
+    try:
+        return FileResponse(entrega.archivo.open('rb'), as_attachment=True, filename=entrega.nombre_archivo)
+    except FileNotFoundError:
+        raise Http404
+
+
+@profesor_required
+def entrega_corregir_view(request, pk):
+    """Respuestas de un alumno en un formulario: las alternativas ya tienen puntaje y el profesor asigna el resto."""
+    entrega = get_object_or_404(
+        Entrega.objects.select_related('actividad__clase__modulo__curso', 'inscripcion__alumno'), pk=pk,
+        actividad__tipo=Actividad.Tipo.FORMULARIO, actividad__clase__modulo__curso__profesor=request.user,
+        actividad__clase__modulo__curso__activo=True)
+    actividad, alumno = entrega.actividad, entrega.inscripcion.alumno
+    form = CorreccionForm(entrega, request.POST or None)
+    if request.method == 'POST' and form.fields and form.is_valid():
+        calificacion = form.save(request.user)
+        nota = str(calificacion.nota).replace('.', ',')
+        messages.success(request, f'Se guardó la corrección de {alumno.get_short_name()}: nota {nota}.')
+        return redirect('actividad_calificar', pk=actividad.pk)
+    return render(request, 'evaluaciones/corregir.html', {
+        'entrega': entrega,
+        'actividad': actividad,
+        'curso': actividad.curso,
+        'alumno': alumno,
+        'form': form,
+        'calificacion': Calificacion.objects.filter(actividad=actividad, inscripcion=entrega.inscripcion).first(),
+        'puntajes': entrega.respuestas.aggregate(obtenido=Sum('puntaje_obtenido'), total=Sum('pregunta__puntaje')),
+    })
+
+
 # ---------- Formularios en línea: preguntas de una actividad ----------
 
 def formulario_propio(request, pk):
@@ -124,6 +181,14 @@ def pregunta_propia(request, pk):
     return pregunta
 
 
+def formulario_bloqueado(request, actividad):
+    """Con respuestas, las preguntas ya no cambian: alterarían los puntajes y las notas."""
+    if not actividad.entregas.exists():
+        return False
+    messages.error(request, 'Este formulario ya tiene respuestas, así que sus preguntas no se pueden modificar.')
+    return True
+
+
 def pagina_formulario(request, actividad, form=None, titulo_modal=''):
     """Si la pregunta vuelve con errores, se reabre su modal apuntando a la misma dirección."""
     preguntas = list(actividad.preguntas.prefetch_related('alternativas'))
@@ -132,6 +197,7 @@ def pagina_formulario(request, actividad, form=None, titulo_modal=''):
         'curso': actividad.curso,
         'preguntas': preguntas,
         'puntaje_total': actividad.preguntas.aggregate(total=Sum('puntaje'))['total'] or 0,
+        'con_respuestas': actividad.entregas.exists(),
         'form': form or PreguntaForm(auto_id='pregunta_%s'),
         # Datos para cargar el modal al editar cada pregunta
         'datos_preguntas': {
@@ -154,6 +220,8 @@ def actividad_formulario_view(request, pk):
 @require_POST
 def pregunta_crear_view(request, pk):
     actividad = formulario_propio(request, pk)
+    if formulario_bloqueado(request, actividad):
+        return redirect('actividad_formulario', pk=actividad.pk)
     form = PreguntaForm(request.POST, instance=Pregunta(actividad=actividad), auto_id='pregunta_%s')
     if not form.is_valid():
         return pagina_formulario(request, actividad, form, 'Agregar pregunta')
@@ -166,6 +234,8 @@ def pregunta_crear_view(request, pk):
 @require_POST
 def pregunta_editar_view(request, pk):
     pregunta = pregunta_propia(request, pk)
+    if formulario_bloqueado(request, pregunta.actividad):
+        return redirect('actividad_formulario', pk=pregunta.actividad_id)
     form = PreguntaForm(request.POST, instance=pregunta, auto_id='pregunta_%s')
     if not form.is_valid():
         return pagina_formulario(request, Actividad.objects.get(pk=pregunta.actividad_id), form, 'Editar pregunta')
@@ -178,6 +248,8 @@ def pregunta_editar_view(request, pk):
 @require_POST
 def pregunta_eliminar_view(request, pk):
     pregunta = pregunta_propia(request, pk)
+    if formulario_bloqueado(request, pregunta.actividad):
+        return redirect('actividad_formulario', pk=pregunta.actividad_id)
     pregunta.delete()
     messages.success(request, 'Se eliminó la pregunta.')
     return redirect('actividad_formulario', pk=pregunta.actividad_id)
@@ -190,6 +262,8 @@ def pregunta_mover_view(request, pk, direccion):
     if direccion not in ('subir', 'bajar'):
         raise Http404
     pregunta = pregunta_propia(request, pk)
+    if formulario_bloqueado(request, pregunta.actividad):
+        return redirect('actividad_formulario', pk=pregunta.actividad_id)
     hermanas = pregunta.actividad.preguntas.all()
     vecina = (hermanas.filter(orden__lt=pregunta.orden).order_by('-orden').first() if direccion == 'subir'
               else hermanas.filter(orden__gt=pregunta.orden).order_by('orden').first())

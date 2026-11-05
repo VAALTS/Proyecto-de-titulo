@@ -31,14 +31,40 @@
                 <div class="table-responsive">
                     <table class="table align-middle mb-0">
                         <thead class="table-light">
-                            <tr><th>Alumno</th><th style="width: 9rem;">Nota</th><th style="min-width: 12rem;">Observación</th></tr>
+                            <tr>
+                                <th>Alumno</th>
+                                <th>Entrega</th>
+                                <th style="width: 9rem;">Nota</th>
+                                <th style="min-width: 12rem;">Observación</th>
+                            </tr>
                         </thead>
                         <tbody>
-                            {% for inscripcion, nota, observacion in form.filas %}
+                            {% for inscripcion, nota, observacion, entrega in form.filas %}
                                 <tr>
                                     <td>
                                         <label for="{{ nota.id_for_label }}" class="fw-semibold mb-0">{{ inscripcion.alumno.get_full_name }}</label>
                                         <div class="small text-muted">{{ inscripcion.alumno.rut }}</div>
+                                    </td>
+                                    <td>
+                                        {% if not entrega %}
+                                            <span class="small text-muted text-nowrap">Sin entrega</span>
+                                        {% else %}
+                                            {% if actividad.tipo == 'archivo' %}
+                                                <a href="{% url 'entrega_descargar' entrega.pk %}" class="btn btn-sm btn-outline-primary text-nowrap"
+                                                   title="{{ entrega.nombre_archivo }}">
+                                                    <i class="bi bi-download me-1"></i>Descargar
+                                                </a>
+                                            {% elif entrega.por_corregir %}
+                                                <a href="{% url 'entrega_corregir' entrega.pk %}" class="btn btn-sm btn-warning text-nowrap">
+                                                    <i class="bi bi-pencil-square me-1"></i>Corregir
+                                                </a>
+                                            {% else %}
+                                                <a href="{% url 'entrega_corregir' entrega.pk %}" class="btn btn-sm btn-outline-primary text-nowrap">
+                                                    <i class="bi bi-list-check me-1"></i>Ver respuestas
+                                                </a>
+                                            {% endif %}
+                                            <div class="small text-muted text-nowrap">{{ entrega.fecha_entrega|date:"d/m/Y H:i" }}</div>
+                                        {% endif %}
                                     </td>
                                     <td>
                                         <input type="text" name="{{ nota.html_name }}" id="{{ nota.id_for_label }}"

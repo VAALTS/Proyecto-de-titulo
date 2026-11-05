@@ -14,6 +14,8 @@ from evaluaciones.forms import ActividadForm
 from usuarios.models import Rol
 from usuarios.views import profesor_required
 
+from .calendario import eventos_de_calendario
+from .contenido import organizar_material, temas_del_foro
 from .forms import AsistenciaForm, BloqueHorarioForm, ClaseForm, MaterialForm, ModuloForm
 from .models import BloqueHorario, Clase, Curso, Inscripcion, Material, Modulo
 
@@ -95,18 +97,6 @@ FORMULARIOS_CURSO = {
 }
 
 
-def organizar_material(modulos):
-    """Deja en cada clase su material de primer nivel (carpetas primero) y en cada carpeta su contenido."""
-    for modulo in modulos:
-        for clase in modulo.clases.all():
-            materiales = list(clase.materiales.all())
-            for material in materiales:
-                material.hijos = [hijo for hijo in materiales if hijo.carpeta_id == material.pk]
-            clase.raiz = sorted((m for m in materiales if m.carpeta_id is None),
-                                key=lambda m: (m.tipo != Material.Tipo.CARPETA, m.titulo.lower()))
-    return modulos
-
-
 def pagina_curso(request, curso, form=None, id_modal='', titulo_modal=''):
     """Si un formulario vuelve con errores, se reabre su modal apuntando a la misma dirección."""
     modulos = organizar_material(list(curso.modulos.prefetch_related(
@@ -127,6 +117,7 @@ def pagina_curso(request, curso, form=None, id_modal='', titulo_modal=''):
         'modal_abierto': {'id': id_modal, 'accion': request.path, 'titulo': titulo_modal} if form else None,
         # Actividades y planilla de notas (RF-11)
         **resumen_del_curso(curso, inscripciones),
+        'temas': temas_del_foro(curso),
     }
     for modal, (nombre, vacio) in FORMULARIOS_CURSO.items():
         contexto[nombre] = form if modal == id_modal else vacio(curso)
@@ -382,28 +373,6 @@ def profesor_asistencia_view(request):
 
 
 # ---------- Horario del curso y calendario semanal (RF-09) ----------
-
-def eventos_de_calendario(bloques, url_curso):
-    """Convierte bloques semanales en eventos repetidos de FullCalendar; cada curso tiene su color.
-
-    `url_curso` recibe un curso y entrega su dirección. FullCalendar numera los días desde el
-    domingo (0), así que dia_semana (lunes = 1) sirve tal cual. También lo usará el alumno (RF-14).
-    """
-    colores = ['#0d6efd', '#198754', '#6f42c1', '#d63384', '#fd7e14', '#20c997']
-    color_por_curso = {}
-    eventos = []
-    for bloque in bloques:
-        color = color_por_curso.setdefault(bloque.curso_id, colores[len(color_por_curso) % len(colores)])
-        eventos.append({
-            'title': f'{bloque.curso.nombre} · {bloque.sala}' if bloque.sala else bloque.curso.nombre,
-            'daysOfWeek': [bloque.dia_semana],
-            'startTime': bloque.hora_inicio.strftime('%H:%M'),
-            'endTime': bloque.hora_fin.strftime('%H:%M'),
-            'color': color,
-            'url': url_curso(bloque.curso),
-        })
-    return eventos
-
 
 @profesor_required
 def profesor_horario_view(request):

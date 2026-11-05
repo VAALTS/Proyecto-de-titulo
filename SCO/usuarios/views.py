@@ -10,6 +10,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from cursos.models import Curso, Inscripcion
+from evaluaciones.calculos import calificaciones_del_alumno
 
 from .cuentas import asignar_clave_temporal
 from .forms import CambioContrasenaForm, CuentaForm, LoginForm
@@ -32,6 +33,7 @@ def tiene_rol(rol):
 
 admin_required = tiene_rol(Rol.ADMINISTRADOR)
 profesor_required = tiene_rol(Rol.PROFESOR)
+alumno_required = tiene_rol(Rol.ALUMNO)
 
 
 # ---------- Inicio de sesión ----------
@@ -76,16 +78,15 @@ def perfil_view(request):
         messages.success(request, 'Tu contraseña se actualizó correctamente.')
         return redirect('perfil')
 
-    return render(request, 'perfil/perfil.html', {'form': form})
+    # RF-17: consolidado del alumno; con clave temporal solo puede cambiarla (ver el middleware)
+    capacitaciones = None
+    if request.user.rol == Rol.ALUMNO and not request.user.debe_cambiar_contrasena:
+        capacitaciones = calificaciones_del_alumno(request.user)
+
+    return render(request, 'perfil/perfil.html', {'form': form, 'capacitaciones': capacitaciones})
 
 
-# ---------- Inicio del alumno (su menú llega en la fase 4) ----------
-# El menú del profesor está en cursos/views_profesor.py (RF-09)
-
-@tiene_rol(Rol.ALUMNO)
-def alumno_inicio_view(request):
-    return render(request, 'inicio_de_sesion/home.html')
-
+# Los menús del profesor y del alumno están en cursos/views_profesor.py y cursos/views_alumno.py
 
 # ---------- Panel del administrador ----------
 

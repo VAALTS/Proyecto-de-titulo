@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import BloqueHorario, Clase, Curso, Inscripcion, Modulo
+from .models import BloqueHorario, Clase, Curso, Inscripcion, MensajeForo, Modulo, TemaForo
 
 
 @admin.register(Curso)
@@ -32,3 +32,15 @@ class ClaseAdmin(admin.ModelAdmin):
 class BloqueHorarioAdmin(admin.ModelAdmin):
     list_display = ('curso', 'dia_semana', 'hora_inicio', 'hora_fin', 'sala')
     list_filter = ('dia_semana', 'curso')
+
+
+class MensajeForoInline(admin.TabularInline):
+    model = MensajeForo
+    extra = 0
+
+
+@admin.register(TemaForo)
+class TemaForoAdmin(admin.ModelAdmin):
+    list_display = ('titulo', 'curso', 'autor', 'fecha_creacion')
+    list_filter = ('curso',)
+    inlines = [MensajeForoInline]

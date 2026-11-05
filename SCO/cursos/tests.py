@@ -2,6 +2,7 @@ import os
 import shutil
 import tempfile
 from datetime import timedelta
+from decimal import Decimal
 from unittest import mock
 
 from django.conf import settings
@@ -11,9 +12,10 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from evaluaciones.models import Actividad, Calificacion
 from usuarios.models import Rol, Usuario
 
-from .models import Asistencia, BloqueHorario, Clase, Curso, Inscripcion, Material, Modulo
+from .models import Asistencia, BloqueHorario, Clase, Curso, Inscripcion, Material, MensajeForo, Modulo, TemaForo
 
 
 def crear_usuario(email, rut, nombre, rol, **campos):
@@ -528,6 +530,15 @@ class MaterialTests(TestCase):
         self.assertEqual(self.client.get(reverse('material_descargar', args=[carpeta.contenido.get().pk])).status_code,
                          404)
 
+    def test_el_alumno_retirado_ya_no_descarga(self):
+        self.subir()
+        Inscripcion.objects.filter(alumno=self.alumno).update(activa=False)
+        self.client.force_login(self.alumno)
+
+        respuesta = self.client.get(reverse('material_descargar', args=[self.clase.materiales.get().pk]))
+
+        self.assertEqual(respuesta.status_code, 404)
+
     def test_quien_no_es_del_curso_no_descarga_ni_modifica(self):
         self.subir()
         material = self.clase.materiales.get()
@@ -746,6 +757,506 @@ class HorarioTests(TestCase):
         self.assertEqual(self.crear_bloque().status_code, 404)
         self.assertEqual(self.client.post(reverse('bloque_eliminar', args=[bloque.pk])).status_code, 404)
         self.assertEqual(self.client.get(reverse('profesor_horario')).context['eventos'], [])
+
+
+class MenuAlumnoTests(TestCase):
+    """RF-13: menú del alumno y la lista de sus cursos."""
+
+    def setUp(self):
+        self.alumno = crear_usuario('ana@ejemplo.cl', '33333333-3', 'Ana', Rol.ALUMNO)
+        self.profesor = crear_usuario('pedro@ejemplo.cl', '11111111-1', 'Pedro', Rol.PROFESOR)
+        self.client.force_login(self.alumno)
+
+    def test_el_menu_tiene_los_tres_accesos_del_requerimiento(self):
+        respuesta = self.client.get(reverse('alumno_inicio'))
+
+        for titulo in ['Cursos', 'Horario', 'Calificaciones']:
+            with self.subTest(seccion=titulo):
+                self.assertContains(respuesta, f'<h5 class="card-title mt-3">{titulo}</h5>', html=True)
+        self.assertContains(respuesta, f'href="{reverse("alumno_cursos")}"')
+        self.assertContains(respuesta, 'col-12 col-md-4')
+
+    def test_al_ingresar_el_alumno_llega_a_su_menu(self):
+        self.client.logout()
+
+        respuesta = self.client.post(reverse('login'), {'email': 'ana@ejemplo.cl', 'password': 'clave-segura-123'},
+                                     follow=True)
+
+        self.assertRedirects(respuesta, reverse('alumno_inicio'))
+        self.assertTemplateUsed(respuesta, 'alumno/menu.html')
+
+    def test_mis_cursos_muestra_solo_sus_inscripciones_vigentes_en_cursos_activos(self):
+        vigente = Curso.objects.create(nombre='Liderazgo', profesor=self.profesor)
+        retirado = Curso.objects.create(nombre='Retirado', profesor=self.profesor)
+        eliminado = Curso.objects.create(nombre='Eliminado', profesor=self.profesor)
+        Curso.objects.create(nombre='Ajeno', profesor=self.profesor)
+        Inscripcion.objects.create(alumno=self.alumno, curso=vigente)
+        Inscripcion.objects.create(alumno=self.alumno, curso=retirado, activa=False)
+        Inscripcion.objects.create(alumno=self.alumno, curso=eliminado)
+        eliminado.eliminar()
+
+        respuesta = self.client.get(reverse('alumno_cursos'))
+
+        self.assertEqual(list(respuesta.context['cursos']), [vigente])
+        self.assertContains(respuesta, 'Pedro Pérez')
+
+    def test_sin_cursos_muestra_un_aviso(self):
+        self.assertContains(self.client.get(reverse('alumno_cursos')), 'Aún no estás inscrito')
+
+    def test_otros_roles_no_entran_a_las_paginas_del_alumno(self):
+        admin = Usuario.objects.create_superuser('admin@ejemplo.cl', 'clave-segura-123', primer_nombre='Admin')
+
+        for usuario in [self.profesor, admin]:
+            self.client.force_login(usuario)
+            for nombre_url in ['alumno_inicio', 'alumno_cursos']:
+                with self.subTest(rol=usuario.rol, pagina=nombre_url):
+                    self.assertEqual(self.client.get(reverse(nombre_url)).status_code, 302)
+
+
+class HorarioAlumnoTests(TestCase):
+    """RF-14: calendario semanal con los bloques de los cursos del alumno."""
+
+    def setUp(self):
+        self.alumno = crear_usuario('ana@ejemplo.cl', '33333333-3', 'Ana', Rol.ALUMNO)
+        self.profesor = crear_usuario('pedro@ejemplo.cl', '11111111-1', 'Pedro', Rol.PROFESOR)
+        self.curso = Curso.objects.create(nombre='Liderazgo', profesor=self.profesor)
+        self.inscripcion = Inscripcion.objects.create(alumno=self.alumno, curso=self.curso)
+        BloqueHorario.objects.create(curso=self.curso, dia_semana=1, hora_inicio='09:00', hora_fin='10:30',
+                                     sala='Sala 2')
+        self.client.force_login(self.alumno)
+
+    def eventos(self):
+        return self.client.get(reverse('alumno_horario')).context['eventos']
+
+    def test_muestra_los_bloques_de_sus_cursos_en_fullcalendar(self):
+        respuesta = self.client.get(reverse('alumno_horario'))
+
+        self.assertEqual(respuesta.context['eventos'], [{
+            'title': 'Liderazgo · Sala 2', 'daysOfWeek': [1], 'startTime': '09:00', 'endTime': '10:30',
+            'color': '#0d6efd', 'url': reverse('alumno_curso', args=[self.curso.pk]),
+        }])
+        self.assertContains(respuesta, 'fullcalendar@6.1.15')
+        self.assertContains(respuesta, 'weekends: false')
+
+    def test_cada_curso_tiene_su_color(self):
+        otro = Curso.objects.create(nombre='Excel', profesor=self.profesor)
+        Inscripcion.objects.create(alumno=self.alumno, curso=otro)
+        BloqueHorario.objects.create(curso=otro, dia_semana=2, hora_inicio='09:00', hora_fin='10:00')
+
+        self.assertEqual(len({evento['color'] for evento in self.eventos()}), 2)
+
+    def test_no_muestra_cursos_ajenos_retirados_ni_eliminados(self):
+        ajeno = Curso.objects.create(nombre='Ajeno', profesor=self.profesor)
+        BloqueHorario.objects.create(curso=ajeno, dia_semana=2, hora_inicio='09:00', hora_fin='10:00')
+        eliminado = Curso.objects.create(nombre='Eliminado', profesor=self.profesor)
+        Inscripcion.objects.create(alumno=self.alumno, curso=eliminado)
+        BloqueHorario.objects.create(curso=eliminado, dia_semana=3, hora_inicio='09:00', hora_fin='10:00')
+        eliminado.eliminar()
+        self.assertEqual(len(self.eventos()), 1)
+
+        self.inscripcion.activa = False
+        self.inscripcion.save()
+        self.assertEqual(self.eventos(), [])
+
+    def test_el_menu_enlaza_al_horario_y_otro_rol_no_entra(self):
+        self.assertContains(self.client.get(reverse('alumno_inicio')), f'href="{reverse("alumno_horario")}"')
+
+        self.client.force_login(self.profesor)
+        self.assertEqual(self.client.get(reverse('alumno_horario')).status_code, 302)
+
+
+class CursoAlumnoTests(TestCase):
+    """RF-16: el alumno ve el contenido de sus cursos y solo el material visible."""
+
+    def setUp(self):
+        self.alumno = crear_usuario('ana@ejemplo.cl', '33333333-3', 'Ana', Rol.ALUMNO)
+        self.profesor = crear_usuario('pedro@ejemplo.cl', '11111111-1', 'Pedro', Rol.PROFESOR)
+        self.curso = Curso.objects.create(nombre='Liderazgo', descripcion='Curso para jefaturas',
+                                          profesor=self.profesor)
+        self.inscripcion = Inscripcion.objects.create(alumno=self.alumno, curso=self.curso)
+        self.modulo = Modulo.objects.create(curso=self.curso, nombre='Fundamentos')
+        self.clase = self.crear_clase(self.modulo, 'Introducción')
+        self.url = reverse('alumno_curso', args=[self.curso.pk])
+        self.client.force_login(self.alumno)
+
+    def crear_clase(self, modulo, titulo):
+        return Clase.objects.create(modulo=modulo, titulo=titulo, fecha='2026-11-02', hora_inicio='09:00',
+                                    hora_fin='10:30')
+
+    def crear_material(self, titulo, tipo='enlace', **campos):
+        if tipo == 'enlace':
+            campos.setdefault('url', 'https://ejemplo.cl/video')
+        return Material.objects.create(clase=self.clase, subido_por=self.profesor, titulo=titulo, tipo=tipo, **campos)
+
+    def test_muestra_el_curso_con_sus_modulos_en_orden_y_sus_clases(self):
+        segundo = Modulo.objects.create(curso=self.curso, nombre='Práctica')
+        self.crear_clase(segundo, 'Taller')
+        Modulo.objects.filter(pk=segundo.pk).update(orden=0)
+
+        respuesta = self.client.get(self.url)
+
+        self.assertEqual([modulo.nombre for modulo in respuesta.context['modulos']], ['Práctica', 'Fundamentos'])
+        self.assertContains(respuesta, 'Curso para jefaturas')
+        self.assertContains(respuesta, 'Pedro Pérez')
+        self.assertContains(respuesta, 'Introducción')
+        self.assertContains(respuesta, 'Taller')
+        self.assertContains(respuesta, '09:00 a 10:30')
+
+    def test_los_archivos_tienen_un_boton_de_descarga(self):
+        material = self.crear_material('Guía 1', 'archivo', archivo='material/curso_1/abc/guia.pdf')
+
+        respuesta = self.client.get(self.url)
+
+        self.assertContains(respuesta, f'href="{reverse("material_descargar", args=[material.pk])}"')
+        self.assertContains(respuesta, 'Descargar')
+        self.assertContains(respuesta, '(guia.pdf)')
+
+    def test_los_enlaces_externos_abren_en_una_pestana_nueva(self):
+        self.crear_material('Video')
+
+        self.assertContains(self.client.get(self.url),
+                            'href="https://ejemplo.cl/video" target="_blank" rel="noopener noreferrer"')
+
+    def test_no_muestra_lo_oculto_ni_las_carpetas_sin_nada_visible(self):
+        self.crear_material('Enlace oculto', visible=False)
+        oculta = self.crear_material('Carpeta oculta', 'carpeta', visible=False)
+        self.crear_material('Dentro de la oculta', carpeta=oculta)
+        self.crear_material('Carpeta vacía', 'carpeta')
+        solo_ocultos = self.crear_material('Carpeta sin visibles', 'carpeta')
+        self.crear_material('Oculto en carpeta', carpeta=solo_ocultos, visible=False)
+        guias = self.crear_material('Guías', 'carpeta')
+        self.crear_material('Guía visible', carpeta=guias)
+
+        respuesta = self.client.get(self.url)
+
+        for titulo in ['Enlace oculto', 'Carpeta oculta', 'Dentro de la oculta', 'Carpeta vacía',
+                       'Carpeta sin visibles', 'Oculto en carpeta']:
+            with self.subTest(titulo=titulo):
+                self.assertNotContains(respuesta, titulo)
+        self.assertContains(respuesta, 'Guías')
+        self.assertContains(respuesta, 'Guía visible')
+
+    def test_un_curso_ajeno_retirado_o_eliminado_responde_404(self):
+        ajeno = Curso.objects.create(nombre='Ajeno', profesor=self.profesor)
+        self.assertEqual(self.client.get(reverse('alumno_curso', args=[ajeno.pk])).status_code, 404)
+
+        eliminado = Curso.objects.create(nombre='Eliminado', profesor=self.profesor)
+        Inscripcion.objects.create(alumno=self.alumno, curso=eliminado)
+        eliminado.eliminar()
+        self.assertEqual(self.client.get(reverse('alumno_curso', args=[eliminado.pk])).status_code, 404)
+
+        self.inscripcion.activa = False
+        self.inscripcion.save()
+        self.assertEqual(self.client.get(self.url).status_code, 404)
+
+    def test_muestra_avisos_si_aun_no_hay_contenido(self):
+        self.assertContains(self.client.get(self.url), 'Sin material todavía')
+
+        Modulo.objects.create(curso=self.curso, nombre='Práctica')
+        self.assertContains(self.client.get(self.url), 'Este módulo aún no tiene clases')
+
+        vacio = Curso.objects.create(nombre='Vacío', profesor=self.profesor)
+        Inscripcion.objects.create(alumno=self.alumno, curso=vacio)
+        self.assertContains(self.client.get(reverse('alumno_curso', args=[vacio.pk])), 'aún no publica el contenido')
+
+    def test_mis_cursos_enlaza_a_la_pagina_del_curso(self):
+        respuesta = self.client.get(reverse('alumno_cursos'))
+
+        self.assertContains(respuesta, f'href="{self.url}"')
+        self.assertNotContains(respuesta, 'Próximamente')
+
+    def test_otros_roles_no_entran(self):
+        self.client.force_login(self.profesor)
+
+        self.assertEqual(self.client.get(self.url).status_code, 302)
+
+
+class ForoTests(TestCase):
+    """RF-16: alumnos y profesor abren temas y responden; solo el profesor elimina."""
+
+    def setUp(self):
+        self.ana = crear_usuario('ana@ejemplo.cl', '33333333-3', 'Ana', Rol.ALUMNO)
+        self.luis = crear_usuario('luis@ejemplo.cl', '22222222-2', 'Luis', Rol.ALUMNO)
+        self.profesor = crear_usuario('pedro@ejemplo.cl', '11111111-1', 'Pedro', Rol.PROFESOR)
+        self.curso = Curso.objects.create(nombre='Liderazgo', profesor=self.profesor)
+        self.ins_ana = Inscripcion.objects.create(alumno=self.ana, curso=self.curso)
+        Inscripcion.objects.create(alumno=self.luis, curso=self.curso)
+        self.crear = reverse('foro_tema_crear', args=[self.curso.pk])
+        self.client.force_login(self.ana)
+
+    def tema(self, titulo='Duda', autor=None, curso=None):
+        tema = TemaForo.objects.create(curso=curso or self.curso, autor=autor or self.ana, titulo=titulo)
+        MensajeForo.objects.create(tema=tema, autor=tema.autor, contenido='Planteamiento')
+        return tema
+
+    def responder(self, tema, contenido='Una respuesta', autor=None):
+        return MensajeForo.objects.create(tema=tema, autor=autor or self.luis, contenido=contenido)
+
+    def test_el_alumno_abre_un_tema_con_su_primer_mensaje(self):
+        respuesta = self.client.post(self.crear, {'titulo': 'Duda del módulo', 'contenido': '¿Cómo parto?'})
+
+        tema = TemaForo.objects.get()
+        self.assertRedirects(respuesta, reverse('foro_tema', args=[tema.pk]), fetch_redirect_response=False)
+        self.assertEqual((tema.curso, tema.autor, tema.titulo), (self.curso, self.ana, 'Duda del módulo'))
+        mensaje = tema.mensajes.get()
+        self.assertEqual((mensaje.autor, mensaje.contenido), (self.ana, '¿Cómo parto?'))
+        self.assertContains(self.client.get(reverse('foro_tema', args=[tema.pk])), 'Se publicó el tema')
+
+    def test_el_profesor_abre_un_tema_y_vuelve_a_su_pagina_del_curso(self):
+        self.client.force_login(self.profesor)
+
+        pagina = self.client.get(self.crear)
+        self.assertContains(pagina, f'href="{reverse("profesor_curso", args=[self.curso.pk])}#foro"')
+
+        self.client.post(self.crear, {'titulo': 'Aviso', 'contenido': 'Bienvenidos'})
+        self.assertEqual(TemaForo.objects.get().autor, self.profesor)
+
+    def test_el_tema_exige_titulo_y_mensaje(self):
+        for datos in [{'titulo': '', 'contenido': 'Algo'}, {'titulo': 'Algo', 'contenido': '  '},
+                      {'titulo': 'Algo', 'contenido': 'x' * 5001}]:
+            with self.subTest(datos=datos['titulo'] or 'sin título'):
+                respuesta = self.client.post(self.crear, datos)
+                self.assertEqual(respuesta.status_code, 200)
+                self.assertContains(respuesta, 'invalid-feedback')
+        self.assertFalse(TemaForo.objects.exists())
+
+    def test_la_pestana_lista_los_temas_del_curso_por_actividad_reciente(self):
+        antiguo = self.tema('Antiguo')
+        self.tema('Nuevo')
+        self.responder(antiguo)
+        otro = Curso.objects.create(nombre='Excel', profesor=self.profesor)
+        self.tema('De otro curso', curso=otro)
+
+        for usuario, pagina in [(self.ana, 'alumno_curso'), (self.profesor, 'profesor_curso')]:
+            self.client.force_login(usuario)
+            respuesta = self.client.get(reverse(pagina, args=[self.curso.pk]))
+            with self.subTest(pagina=pagina):
+                self.assertEqual([(t.titulo, t.respuestas) for t in respuesta.context['temas']],
+                                 [('Antiguo', 1), ('Nuevo', 0)])
+                self.assertContains(respuesta, f'href="{self.crear}"')
+                self.assertContains(respuesta, 'data-bs-target="#foro"')
+                self.assertNotContains(respuesta, 'De otro curso')
+
+    def test_sin_temas_muestra_un_aviso(self):
+        self.assertContains(self.client.get(reverse('alumno_curso', args=[self.curso.pk])), 'Aún no hay temas')
+
+    def test_alumnos_y_profesor_responden_y_los_mensajes_quedan_en_orden(self):
+        tema = self.tema()
+        url = reverse('foro_tema', args=[tema.pk])
+
+        self.client.force_login(self.luis)
+        self.assertRedirects(self.client.post(url, {'contenido': 'Yo tengo la misma duda'}), url,
+                             fetch_redirect_response=False)
+        self.client.force_login(self.profesor)
+        self.client.post(url, {'contenido': 'Revisen la guía'})
+
+        self.assertEqual([(m.autor, m.contenido) for m in tema.mensajes.all()],
+                         [(self.ana, 'Planteamiento'), (self.luis, 'Yo tengo la misma duda'),
+                          (self.profesor, 'Revisen la guía')])
+        pagina = self.client.get(url)
+        self.assertContains(pagina, 'Revisen la guía')
+        self.assertContains(pagina, '<span class="badge text-bg-primary ms-1">Profesor</span>', count=1, html=True)
+
+    def test_un_mensaje_vacio_no_se_publica(self):
+        tema = self.tema()
+
+        respuesta = self.client.post(reverse('foro_tema', args=[tema.pk]), {'contenido': '   '})
+
+        self.assertContains(respuesta, 'invalid-feedback')
+        self.assertEqual(tema.mensajes.count(), 1)
+
+    def test_el_html_de_un_mensaje_no_se_ejecuta(self):
+        tema = self.tema('<b>Título</b>')
+        self.responder(tema, '<script>alert(1)</script>')
+
+        respuesta = self.client.get(reverse('foro_tema', args=[tema.pk]))
+
+        self.assertNotContains(respuesta, '<script>alert(1)')
+        self.assertNotContains(respuesta, '<b>Título')
+        self.assertContains(respuesta, '&lt;script&gt;alert(1)')
+
+    def test_solo_entran_el_profesor_del_curso_y_sus_alumnos_vigentes(self):
+        tema = self.tema()
+        ver, crear = reverse('foro_tema', args=[tema.pk]), self.crear
+        admin = Usuario.objects.create_superuser('admin@ejemplo.cl', 'clave-segura-123', primer_nombre='Admin')
+        for usuario in [crear_usuario('marta@ejemplo.cl', '44444444-4', 'Marta', Rol.PROFESOR),
+                        crear_usuario('rosa@ejemplo.cl', '55555555-5', 'Rosa', Rol.ALUMNO), admin]:
+            self.client.force_login(usuario)
+            with self.subTest(usuario=usuario.email):
+                self.assertEqual(self.client.get(ver).status_code, 404)
+                self.assertEqual(self.client.get(crear).status_code, 404)
+                self.assertEqual(self.client.post(ver, {'contenido': 'Hola'}).status_code, 404)
+                self.assertEqual(self.client.post(crear, {'titulo': 'A', 'contenido': 'B'}).status_code, 404)
+
+        self.client.logout()
+        self.assertEqual(self.client.get(ver).status_code, 302)
+        self.assertEqual(tema.mensajes.count(), 1)
+        self.assertEqual(TemaForo.objects.count(), 1)
+
+    def test_el_alumno_retirado_y_el_curso_eliminado_cierran_el_foro(self):
+        tema = self.tema()
+        ver = reverse('foro_tema', args=[tema.pk])
+
+        self.ins_ana.activa = False
+        self.ins_ana.save()
+        self.assertEqual(self.client.get(ver).status_code, 404)
+
+        self.client.force_login(self.luis)
+        self.assertEqual(self.client.get(ver).status_code, 200)
+        self.curso.eliminar()
+        self.assertEqual(self.client.get(ver).status_code, 404)
+
+    def test_el_mensaje_de_un_alumno_retirado_se_conserva(self):
+        tema = self.tema()
+        self.ins_ana.activa = False
+        self.ins_ana.save()
+        self.client.force_login(self.luis)
+
+        self.assertContains(self.client.get(reverse('foro_tema', args=[tema.pk])), 'Ana Pérez')
+
+    def test_el_profesor_elimina_una_respuesta(self):
+        tema = self.tema()
+        mensaje = self.responder(tema)
+        self.client.force_login(self.profesor)
+
+        respuesta = self.client.post(reverse('foro_mensaje_eliminar', args=[mensaje.pk]), follow=True)
+
+        self.assertContains(respuesta, 'Se eliminó el mensaje')
+        self.assertEqual(tema.mensajes.count(), 1)
+
+    def test_el_primer_mensaje_no_se_elimina_solo(self):
+        tema = self.tema()
+        self.responder(tema)
+        self.client.force_login(self.profesor)
+        primero = tema.mensajes.first()
+
+        self.assertNotContains(self.client.get(reverse('foro_tema', args=[tema.pk])),
+                               reverse('foro_mensaje_eliminar', args=[primero.pk]))
+        respuesta = self.client.post(reverse('foro_mensaje_eliminar', args=[primero.pk]), follow=True)
+
+        self.assertContains(respuesta, 'elimine el tema completo')
+        self.assertEqual(tema.mensajes.count(), 2)
+
+    def test_el_profesor_elimina_un_tema_con_todos_sus_mensajes(self):
+        tema = self.tema()
+        self.responder(tema)
+        self.client.force_login(self.profesor)
+
+        respuesta = self.client.post(reverse('foro_tema_eliminar', args=[tema.pk]))
+
+        self.assertRedirects(respuesta, f"{reverse('profesor_curso', args=[self.curso.pk])}#foro",
+                             fetch_redirect_response=False)
+        self.assertFalse(TemaForo.objects.exists())
+        self.assertFalse(MensajeForo.objects.exists())
+
+    def test_los_alumnos_y_otros_profesores_no_eliminan(self):
+        tema = self.tema()
+        mensaje = self.responder(tema, autor=self.ana)
+        eliminar_tema = reverse('foro_tema_eliminar', args=[tema.pk])
+        eliminar_mensaje = reverse('foro_mensaje_eliminar', args=[mensaje.pk])
+
+        pagina = self.client.get(reverse('foro_tema', args=[tema.pk]))
+        self.assertNotContains(pagina, eliminar_tema)
+        self.assertNotContains(pagina, eliminar_mensaje)
+        self.assertEqual(self.client.post(eliminar_tema).status_code, 302)
+        self.assertEqual(self.client.post(eliminar_mensaje).status_code, 302)
+
+        self.client.force_login(crear_usuario('marta@ejemplo.cl', '44444444-4', 'Marta', Rol.PROFESOR))
+        self.assertEqual(self.client.post(eliminar_tema).status_code, 404)
+        self.assertEqual(self.client.post(eliminar_mensaje).status_code, 404)
+        self.assertEqual(tema.mensajes.count(), 2)
+
+
+class PerfilAlumnoTests(TestCase):
+    """RF-17: datos del alumno, sus capacitaciones y las funciones de su cuenta."""
+
+    def setUp(self):
+        self.alumno = crear_usuario('ana@ejemplo.cl', '33333333-3', 'Ana', Rol.ALUMNO)
+        self.profesor = crear_usuario('pedro@ejemplo.cl', '11111111-1', 'Pedro', Rol.PROFESOR)
+        self.curso = Curso.objects.create(nombre='Liderazgo', profesor=self.profesor)
+        self.inscripcion = Inscripcion.objects.create(alumno=self.alumno, curso=self.curso)
+        self.client.force_login(self.alumno)
+
+    def calificar(self, nota, ponderacion):
+        modulo = Modulo.objects.create(curso=self.curso, nombre='Fundamentos')
+        clase = Clase.objects.create(modulo=modulo, titulo='Introducción', fecha=timezone.localdate(),
+                                     hora_inicio='09:00', hora_fin='10:30')
+        actividad = Actividad.objects.create(clase=clase, titulo='Informe', ponderacion=Decimal(ponderacion),
+                                             fecha_limite=timezone.now())
+        Calificacion.objects.create(actividad=actividad, inscripcion=self.inscripcion, nota=Decimal(nota),
+                                    registrada_por=self.profesor)
+
+    def test_muestra_sus_datos_y_sus_capacitaciones_con_el_promedio(self):
+        self.calificar('6.5', '100')
+
+        respuesta = self.client.get(reverse('perfil'))
+
+        self.assertContains(respuesta, 'ana@ejemplo.cl')
+        self.assertContains(respuesta, '33333333-3')
+        self.assertContains(respuesta, 'Mis capacitaciones')
+        self.assertContains(respuesta, f'<a href="{reverse("alumno_curso", args=[self.curso.pk])}">Liderazgo</a>',
+                            html=True)
+        self.assertContains(respuesta, '<span class="fw-bold">6,5</span>', html=True)
+        self.assertNotContains(respuesta, 'parcial (')
+
+    def test_el_promedio_parcial_se_indica(self):
+        self.calificar('6.5', '30')
+
+        self.assertContains(self.client.get(reverse('perfil')), 'parcial (30 % evaluado)')
+
+    def test_no_lista_cursos_ajenos_retirados_ni_eliminados(self):
+        Curso.objects.create(nombre='Ajeno', profesor=self.profesor)
+        retirado = Curso.objects.create(nombre='Retirado', profesor=self.profesor)
+        Inscripcion.objects.create(alumno=self.alumno, curso=retirado, activa=False)
+        eliminado = Curso.objects.create(nombre='Eliminado', profesor=self.profesor)
+        Inscripcion.objects.create(alumno=self.alumno, curso=eliminado)
+        eliminado.eliminar()
+
+        capacitaciones = self.client.get(reverse('perfil')).context['capacitaciones']
+
+        self.assertEqual([resumen['curso'] for resumen in capacitaciones], [self.curso])
+
+    def test_tiene_los_botones_del_requerimiento(self):
+        respuesta = self.client.get(reverse('perfil'))
+
+        self.assertContains(respuesta, 'href="#cambiar-contrasena"')
+        self.assertContains(respuesta, 'id="cambiar-contrasena"')
+        self.assertContains(respuesta, f'href="{reverse("alumno_horario")}"')
+        self.assertContains(respuesta, f'href="{reverse("alumno_calificaciones")}"')
+        # Uno en el menú de usuario y otro en el perfil
+        self.assertContains(respuesta, f'action="{reverse("logout")}"', count=2)
+
+    def test_sin_cursos_muestra_un_aviso(self):
+        self.inscripcion.activa = False
+        self.inscripcion.save()
+
+        self.assertContains(self.client.get(reverse('perfil')), 'Aún no estás inscrito')
+
+    def test_si_la_contrasena_no_se_cambia_sigue_viendo_sus_capacitaciones(self):
+        respuesta = self.client.post(reverse('perfil'), {'old_password': 'incorrecta', 'new_password1': 'x',
+                                                         'new_password2': 'x'})
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertContains(respuesta, 'Mis capacitaciones')
+
+    def test_con_clave_temporal_no_ve_el_consolidado_ni_los_accesos(self):
+        self.alumno.debe_cambiar_contrasena = True
+        self.alumno.save()
+
+        respuesta = self.client.get(reverse('perfil'))
+
+        self.assertContains(respuesta, 'contraseña temporal')
+        self.assertNotContains(respuesta, 'Mis capacitaciones')
+        self.assertNotContains(respuesta, 'Consultar horario')
+
+    def test_los_otros_roles_no_ven_la_seccion_del_alumno(self):
+        self.client.force_login(self.profesor)
+
+        respuesta = self.client.get(reverse('perfil'))
+
+        self.assertContains(respuesta, 'Cambiar contraseña')
+        self.assertNotContains(respuesta, 'Mis capacitaciones')
+        self.assertNotContains(respuesta, 'Consultar horario')
 
 
 class AsignaturasDelProfesorTests(TestCase):

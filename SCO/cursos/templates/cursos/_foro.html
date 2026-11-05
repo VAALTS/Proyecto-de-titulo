@@ -1,0 +1,39 @@
+{# RF-16: pestaña del foro; la comparten el profesor y los alumnos y recibe curso y temas #}
+<div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
+    <p class="text-muted mb-0">Espacio para conversar sobre el curso entre el profesor y los alumnos.</p>
+    <a href="{% url 'foro_tema_crear' curso.pk %}" class="btn btn-primary">
+        <i class="bi bi-plus-lg me-1"></i>Abrir tema
+    </a>
+</div>
+
+{% if temas %}
+    <div class="card shadow-sm border-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Tema</th>
+                        <th class="text-center">Respuestas</th>
+                        <th class="d-none d-md-table-cell">Última actividad</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for tema in temas %}
+                        <tr class="position-relative">
+                            <td>
+                                <a href="{% url 'foro_tema' tema.pk %}" class="stretched-link text-reset text-decoration-none fw-semibold text-break">{{ tema.titulo }}</a>
+                                <div class="small text-muted">{{ tema.autor.get_short_name }} · {{ tema.fecha_creacion|date:"d/m/Y H:i" }}</div>
+                            </td>
+                            <td class="text-center">{{ tema.respuestas }}</td>
+                            <td class="d-none d-md-table-cell text-nowrap">{{ tema.ultima_actividad|date:"d/m/Y H:i" }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+{% else %}
+    <div class="card shadow-sm border-0">
+        <div class="card-body text-center text-muted py-5">Aún no hay temas en el foro de este curso.</div>
+    </div>
+{% endif %}

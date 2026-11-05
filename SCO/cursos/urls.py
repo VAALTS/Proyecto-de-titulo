@@ -1,8 +1,15 @@
 from django.urls import path
 
-from . import views, views_profesor
+from . import views, views_alumno, views_foro, views_profesor
 
 urlpatterns = [
+    # Menú y cursos del alumno (RF-13 y RF-16)
+    path('alumno/', views_alumno.alumno_inicio_view, name='alumno_inicio'),
+    path('alumno/cursos/', views_alumno.alumno_cursos_view, name='alumno_cursos'),
+    path('alumno/cursos/<int:pk>/', views_alumno.alumno_curso_view, name='alumno_curso'),
+    path('alumno/horario/', views_alumno.alumno_horario_view, name='alumno_horario'),
+    path('alumno/calificaciones/', views_alumno.alumno_calificaciones_view, name='alumno_calificaciones'),
+
     # Menú y cursos del profesor (RF-09 y RF-10)
     path('profesor/', views_profesor.profesor_inicio_view, name='profesor_inicio'),
     path('profesor/cursos/', views_profesor.profesor_cursos_view, name='profesor_cursos'),
@@ -34,8 +41,14 @@ urlpatterns = [
     path('profesor/cursos/<int:pk>/bloques/crear/', views_profesor.bloque_crear_view, name='bloque_crear'),
     path('profesor/bloques/<int:pk>/editar/', views_profesor.bloque_editar_view, name='bloque_editar'),
     path('profesor/bloques/<int:pk>/eliminar/', views_profesor.bloque_eliminar_view, name='bloque_eliminar'),
-    # Descarga protegida: la usan el profesor y, en la fase 4, los alumnos inscritos
+    # Descarga protegida: la usan el profesor y los alumnos inscritos
     path('material/<int:pk>/descargar/', views_profesor.material_descargar_view, name='material_descargar'),
+
+    # Foro de cada curso (RF-16)
+    path('cursos/<int:pk>/foro/temas/crear/', views_foro.foro_tema_crear_view, name='foro_tema_crear'),
+    path('foro/temas/<int:pk>/', views_foro.foro_tema_view, name='foro_tema'),
+    path('foro/temas/<int:pk>/eliminar/', views_foro.foro_tema_eliminar_view, name='foro_tema_eliminar'),
+    path('foro/mensajes/<int:pk>/eliminar/', views_foro.foro_mensaje_eliminar_view, name='foro_mensaje_eliminar'),
 
     # Gestión de cursos del administrador (RF-06)
     path('panel/cursos/', views.gestion_cursos_view, name='gestion_cursos'),

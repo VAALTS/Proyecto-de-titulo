@@ -1,0 +1,145 @@
+{% extends 'base.html' %}
+
+{# RF-16: instrucciones de una actividad, entrega del alumno y su nota #}
+
+{% block title %}{{ actividad.titulo }}{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="fw-bold mb-1"><i class="bi bi-clipboard-check text-success me-2"></i>{{ actividad.titulo }}</h2>
+        <p class="text-muted mb-0">{{ curso.nombre }} · {{ actividad.clase.modulo.nombre }} · {{ actividad.clase.titulo }}</p>
+    </div>
+    <a href="{% url 'alumno_curso' curso.pk %}#actividades" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i>Volver al curso
+    </a>
+</div>
+
+<div class="row g-4">
+
+    <div class="col-12 col-lg-7">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-body">
+                <h5 class="card-title mb-3">Instrucciones</h5>
+                <dl class="row mb-3">
+                    <dt class="col-sm-4">Tipo</dt>
+                    <dd class="col-sm-8">{{ actividad.get_tipo_display }}</dd>
+                    <dt class="col-sm-4">Ponderación</dt>
+                    <dd class="col-sm-8">{{ actividad.ponderacion|floatformat:"-2" }} %</dd>
+                    <dt class="col-sm-4">Fecha límite</dt>
+                    <dd class="col-sm-8">{{ actividad.fecha_limite|date:"d/m/Y H:i" }}</dd>
+                    <dt class="col-sm-4">Estado</dt>
+                    <dd class="col-sm-8">{% include 'evaluaciones/_estado_entrega.html' %}</dd>
+                </dl>
+                {% if actividad.descripcion %}
+                    <p class="mb-0">{{ actividad.descripcion|linebreaksbr }}</p>
+                {% else %}
+                    <p class="text-muted mb-0">Esta actividad no tiene instrucciones adicionales.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12 col-lg-5">
+        {% if calificacion %}
+            <div class="card shadow-sm border-0 mb-4">
+                <div class="card-body">
+                    <h5 class="card-title mb-2">Tu nota</h5>
+                    <div class="fs-4 fw-bold{% if calificacion.nota < 4 %} text-danger{% endif %}">{{ calificacion.nota }}</div>
+                    {% if calificacion.observacion %}<p class="small mt-2 mb-0">{{ calificacion.observacion|linebreaksbr }}</p>{% endif %}
+                </div>
+            </div>
+        {% endif %}
+
+        <div class="card shadow-sm border-0">
+            <div class="card-body">
+                <h5 class="card-title mb-3">Tu entrega</h5>
+                {% if actividad.tipo == 'formulario' %}
+                    {% if entrega %}
+                        <p class="mb-0">Respondiste el {{ entrega.fecha_entrega|date:"d/m/Y H:i" }}.</p>
+                        {% if not calificacion %}
+                            <p class="small text-muted mt-2 mb-0">Tu nota aparecerá cuando tu profesor corrija las preguntas de desarrollo.</p>
+                        {% endif %}
+                    {% elif puede_entregar %}
+                        <p class="mb-0">Responde todas las preguntas y envíalas al final de esta página. Solo puedes enviarlas una vez.</p>
+                    {% elif calificacion %}
+                        <p class="small text-muted mb-0">La actividad ya fue calificada, así que ya no se puede responder.</p>
+                    {% elif actividad.abierta %}
+                        <p class="text-muted mb-0">Tu profesor aún no publica las preguntas.</p>
+                    {% else %}
+                        <p class="text-muted">No registras una entrega en esta actividad.</p>
+                        <p class="small text-muted mb-0">El plazo de entrega ya terminó.</p>
+                    {% endif %}
+                {% else %}
+                    {% if entrega %}
+                        <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
+                            <div class="text-break">
+                                <div class="fw-semibold">{{ entrega.nombre_archivo }}</div>
+                                <div class="small text-muted">Entregado el {{ entrega.fecha_entrega|date:"d/m/Y H:i" }}</div>
+                            </div>
+                            <a href="{% url 'entrega_descargar' entrega.pk %}" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-download me-1"></i>Descargar
+                            </a>
+                        </div>
+                    {% elif not puede_entregar %}
+                        <p class="text-muted">No registras una entrega en esta actividad.</p>
+                    {% endif %}
+
+                    {% if puede_entregar %}
+                        <form method="post" enctype="multipart/form-data" novalidate
+                              data-confirmar="{% if entrega %}¿Seguro que quieres reemplazar tu entrega? El archivo anterior se borrará.{% else %}¿Seguro que quieres entregar este archivo?{% endif %}">
+                            {% csrf_token %}
+                            {% include 'administrador/_campos_formulario.html' with una_columna=True %}
+                            <button type="submit" class="btn btn-success mt-3">
+                                <i class="bi bi-upload me-1"></i>{% if entrega %}Reemplazar entrega{% else %}Entregar{% endif %}
+                            </button>
+                        </form>
+                    {% elif calificacion %}
+                        <p class="small text-muted mb-0">La actividad ya fue calificada, así que la entrega no se puede cambiar.</p>
+                    {% else %}
+                        <p class="small text-muted mb-0">El plazo de entrega ya terminó.</p>
+                    {% endif %}
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    {% if actividad.tipo == 'formulario' and puede_entregar %}
+        <div class="col-12">
+            <div class="card shadow-sm border-0">
+                <div class="card-body">
+                    <h5 class="card-title mb-3">Preguntas</h5>
+                    {% if form.errors %}
+                        <div class="alert alert-danger py-2" role="alert">Responde todas las preguntas; tus respuestas aún no se han enviado.</div>
+                    {% endif %}
+                    <form method="post" novalidate
+                          data-confirmar="¿Seguro que quieres enviar tus respuestas? Solo puedes hacerlo una vez.">
+                        {% csrf_token %}
+                        {% for pregunta, campo in form.filas %}
+                            <fieldset class="mb-4">
+                                <legend class="fs-6 fw-semibold">
+                                    {{ forloop.counter }}. {{ pregunta.enunciado|linebreaksbr }}
+                                    <span class="small fw-normal text-muted">({{ pregunta.puntaje }} punto{{ pregunta.puntaje|pluralize }})</span>
+                                </legend>
+                                {% if pregunta.tipo == 'alternativas' %}
+                                    {% for opcion in campo %}
+                                        <div class="form-check">
+                                            {{ opcion.tag }}
+                                            <label class="form-check-label" for="{{ opcion.id_for_label }}">{{ opcion.choice_label }}</label>
+                                        </div>
+                                    {% endfor %}
+                                {% else %}
+                                    {{ campo }}
+                                {% endif %}
+                                {% for error in campo.errors %}<div class="small text-danger mt-1">{{ error }}</div>{% endfor %}
+                            </fieldset>
+                        {% endfor %}
+                        <button type="submit" class="btn btn-success"><i class="bi bi-send me-1"></i>Enviar respuestas</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    {% endif %}
+
+</div>
+{% endblock %}

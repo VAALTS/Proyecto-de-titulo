@@ -17,12 +17,20 @@
         <a href="{% url 'profesor_curso' curso.pk %}#actividades" class="btn btn-outline-secondary">
             <i class="bi bi-arrow-left me-1"></i>Volver al curso
         </a>
-        <button type="button" class="btn btn-primary abre-pregunta" data-accion="{% url 'pregunta_crear' actividad.pk %}"
-                data-titulo-modal="Agregar pregunta" data-confirmar="¿Está seguro de agregar esta pregunta?">
-            <i class="bi bi-plus-lg me-1"></i>Agregar pregunta
-        </button>
+        {% if not con_respuestas %}
+            <button type="button" class="btn btn-primary abre-pregunta" data-accion="{% url 'pregunta_crear' actividad.pk %}"
+                    data-titulo-modal="Agregar pregunta" data-confirmar="¿Está seguro de agregar esta pregunta?">
+                <i class="bi bi-plus-lg me-1"></i>Agregar pregunta
+            </button>
+        {% endif %}
     </div>
 </div>
+
+{% if con_respuestas %}
+    <div class="alert alert-info" role="alert">
+        <i class="bi bi-lock me-1"></i>Este formulario ya tiene respuestas, así que sus preguntas no se pueden modificar.
+    </div>
+{% endif %}
 
 {% for pregunta in preguntas %}
     <div class="card shadow-sm border-0 mb-3">
@@ -34,29 +42,31 @@
                     <span class="small text-muted">{{ pregunta.puntaje }} punto{{ pregunta.puntaje|pluralize }}</span>
                     <p class="mt-2 mb-2">{{ pregunta.enunciado|linebreaksbr }}</p>
                 </div>
-                <div class="d-flex flex-wrap gap-1">
-                    <form method="post" action="{% url 'pregunta_mover' pregunta.pk 'subir' %}" class="m-0">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-sm btn-outline-secondary" title="Subir pregunta"
-                                {% if forloop.first %}disabled{% endif %}><i class="bi bi-arrow-up"></i></button>
-                    </form>
-                    <form method="post" action="{% url 'pregunta_mover' pregunta.pk 'bajar' %}" class="m-0">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-sm btn-outline-secondary" title="Bajar pregunta"
-                                {% if forloop.last %}disabled{% endif %}><i class="bi bi-arrow-down"></i></button>
-                    </form>
-                    <button type="button" class="btn btn-sm btn-outline-primary abre-pregunta" title="Editar pregunta"
-                            data-pregunta="{{ pregunta.pk }}" data-accion="{% url 'pregunta_editar' pregunta.pk %}"
-                            data-titulo-modal="Editar pregunta"
-                            data-confirmar="¿Está seguro de guardar los cambios de esta pregunta?">
-                        <i class="bi bi-pencil"></i>
-                    </button>
-                    <form method="post" action="{% url 'pregunta_eliminar' pregunta.pk %}" class="m-0"
-                          data-confirmar="¿Está seguro de eliminar esta pregunta?">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Eliminar pregunta"><i class="bi bi-trash"></i></button>
-                    </form>
-                </div>
+                {% if not con_respuestas %}
+                    <div class="d-flex flex-wrap gap-1">
+                        <form method="post" action="{% url 'pregunta_mover' pregunta.pk 'subir' %}" class="m-0">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-outline-secondary" title="Subir pregunta"
+                                    {% if forloop.first %}disabled{% endif %}><i class="bi bi-arrow-up"></i></button>
+                        </form>
+                        <form method="post" action="{% url 'pregunta_mover' pregunta.pk 'bajar' %}" class="m-0">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-outline-secondary" title="Bajar pregunta"
+                                    {% if forloop.last %}disabled{% endif %}><i class="bi bi-arrow-down"></i></button>
+                        </form>
+                        <button type="button" class="btn btn-sm btn-outline-primary abre-pregunta" title="Editar pregunta"
+                                data-pregunta="{{ pregunta.pk }}" data-accion="{% url 'pregunta_editar' pregunta.pk %}"
+                                data-titulo-modal="Editar pregunta"
+                                data-confirmar="¿Está seguro de guardar los cambios de esta pregunta?">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <form method="post" action="{% url 'pregunta_eliminar' pregunta.pk %}" class="m-0"
+                              data-confirmar="¿Está seguro de eliminar esta pregunta?">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-outline-danger" title="Eliminar pregunta"><i class="bi bi-trash"></i></button>
+                        </form>
+                    </div>
+                {% endif %}
             </div>
             {% if pregunta.tipo == 'alternativas' %}
                 <ul class="list-unstyled mb-0">

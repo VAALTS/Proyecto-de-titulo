@@ -1,16 +1,22 @@
+import os
+import shutil
+import tempfile
 from datetime import timedelta
 from decimal import Decimal
+from unittest import mock
 
+from django.conf import settings
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from cursos.models import Clase, Curso, Inscripcion, Modulo
 from usuarios.models import Rol, Usuario
 
-from .calculos import promedio_ponderado
-from .models import Actividad, Alternativa, Calificacion, Pregunta
+from .calculos import nota_por_puntaje, promedio_ponderado
+from .models import Actividad, Alternativa, Calificacion, Entrega, Pregunta, Respuesta
 
 
 def crear_usuario(email, rut, nombre, rol):
@@ -32,6 +38,18 @@ class PromedioPonderadoTests(TestCase):
 
     def test_sin_notas_no_hay_promedio(self):
         self.assertEqual(promedio_ponderado([]), (None, Decimal('0')))
+
+
+class NotaPorPuntajeTests(TestCase):
+
+    def test_con_60_por_ciento_de_exigencia_el_60_por_ciento_es_un_4(self):
+        for puntaje, nota in [('0', '1.0'), ('3', '2.5'), ('6', '4.0'), ('8', '5.5'), ('10', '7.0')]:
+            with self.subTest(puntaje=puntaje):
+                self.assertEqual(nota_por_puntaje(Decimal(puntaje), Decimal('10')), Decimal(nota))
+
+    def test_redondea_a_un_decimal(self):
+        # 1 de 3 puntos: 1 + 3 × 1 / 1,8 = 2,67
+        self.assertEqual(nota_por_puntaje(Decimal('1'), Decimal('3')), Decimal('2.7'))
 
 
 class EvaluacionesTestCase(TestCase):
@@ -316,3 +334,599 @@ class FormularioTests(EvaluacionesTestCase):
         self.assertEqual(self.crear_pregunta().status_code, 404)
         self.assertEqual(self.client.post(reverse('pregunta_eliminar', args=[pregunta.pk])).status_code, 404)
         self.assertTrue(Pregunta.objects.filter(pk=pregunta.pk).exists())
+
+
+class CalificacionesAlumnoTests(EvaluacionesTestCase):
+    """RF-15: notas agrupadas por curso y promedio ponderado, tal como en la planilla del profesor."""
+
+    def setUp(self):
+        super().setUp()
+        self.informe = self.crear_actividad('Informe', '40')
+        self.prueba = self.crear_actividad('Prueba', '60')
+        self.client.force_login(self.ana)
+
+    def notas(self, actividad, inscripcion, nota, observacion=''):
+        return Calificacion.objects.create(actividad=actividad, inscripcion=inscripcion, nota=Decimal(nota),
+                                           registrada_por=self.profesor, observacion=observacion)
+
+    def resumen(self):
+        return self.client.get(reverse('alumno_calificaciones')).context['cursos']
+
+    def test_muestra_cada_nota_con_su_observacion_y_el_promedio_ponderado(self):
+        self.notas(self.informe, self.ins_ana, '6.0', 'Buen análisis')
+        self.notas(self.prueba, self.ins_ana, '4.5')
+
+        respuesta = self.client.get(reverse('alumno_calificaciones'))
+
+        self.assertContains(respuesta, 'Liderazgo')
+        self.assertContains(respuesta, 'Buen análisis')
+        self.assertContains(respuesta, '<div class="fs-4 fw-bold">5,1</div>', html=True)
+        self.assertNotContains(respuesta, 'parcial (')
+
+    def test_con_notas_pendientes_el_promedio_es_parcial(self):
+        self.notas(self.informe, self.ins_ana, '6.0')
+
+        respuesta = self.client.get(reverse('alumno_calificaciones'))
+
+        self.assertEqual(respuesta.context['cursos'][0]['promedio'], Decimal('6.0'))
+        self.assertContains(respuesta, 'parcial (40 % evaluado)')
+        self.assertContains(respuesta, 'Prueba')
+
+    def test_sin_notas_no_hay_promedio(self):
+        self.assertIsNone(self.resumen()[0]['promedio'])
+
+    def test_el_promedio_cambia_apenas_el_profesor_corrige_una_nota(self):
+        calificacion = self.notas(self.informe, self.ins_ana, '3.0')
+        self.assertEqual(self.resumen()[0]['promedio'], Decimal('3.0'))
+
+        calificacion.nota = Decimal('5.0')
+        calificacion.save()
+
+        self.assertEqual(self.resumen()[0]['promedio'], Decimal('5.0'))
+
+    def test_la_actividad_oculta_solo_aparece_si_tiene_nota_y_el_promedio_coincide_con_el_del_profesor(self):
+        Actividad.objects.filter(pk=self.prueba.pk).update(visible=False)
+        self.notas(self.informe, self.ins_ana, '6.0')
+        self.assertEqual([fila['actividad'] for fila in self.resumen()[0]['filas']], [self.informe])
+
+        self.notas(self.prueba, self.ins_ana, '3.0')
+        resumen = self.resumen()[0]
+        self.assertEqual([fila['actividad'] for fila in resumen['filas']], [self.informe, self.prueba])
+
+        self.client.force_login(self.profesor)
+        planilla = self.client.get(reverse('profesor_curso', args=[self.curso.pk])).context['filas_notas']
+        fila_ana = next(fila for fila in planilla if fila['inscripcion'] == self.ins_ana)
+        self.assertEqual((resumen['promedio'], resumen['evaluado']), (fila_ana['promedio'], fila_ana['evaluado']))
+
+    def test_no_ve_las_notas_de_otros_alumnos(self):
+        self.notas(self.informe, self.ins_luis, '2.0', 'Comentario para Luis')
+
+        respuesta = self.client.get(reverse('alumno_calificaciones'))
+
+        self.assertIsNone(respuesta.context['cursos'][0]['promedio'])
+        self.assertNotContains(respuesta, 'Comentario para Luis')
+
+    def test_agrupa_por_curso_en_orden_y_sin_retirados_ni_eliminados(self):
+        excel = Curso.objects.create(nombre='Excel', profesor=self.profesor)
+        modulo = Modulo.objects.create(curso=excel, nombre='Tablas')
+        clase = Clase.objects.create(modulo=modulo, titulo='Fórmulas', fecha=timezone.localdate(),
+                                     hora_inicio='09:00', hora_fin='10:30')
+        tarea = Actividad.objects.create(clase=clase, titulo='Tarea', ponderacion=Decimal('100'),
+                                         fecha_limite=timezone.now())
+        ins_excel = Inscripcion.objects.create(alumno=self.ana, curso=excel)
+        self.notas(tarea, ins_excel, '7.0')
+        self.notas(self.informe, self.ins_ana, '5.0')
+        retirado = Curso.objects.create(nombre='Retirado', profesor=self.profesor)
+        Inscripcion.objects.create(alumno=self.ana, curso=retirado, activa=False)
+        eliminado = Curso.objects.create(nombre='Eliminado', profesor=self.profesor)
+        Inscripcion.objects.create(alumno=self.ana, curso=eliminado)
+        eliminado.eliminar()
+
+        resumen = self.resumen()
+
+        self.assertEqual([(r['curso'].nombre, r['promedio']) for r in resumen],
+                         [('Excel', Decimal('7.0')), ('Liderazgo', Decimal('5.0'))])
+
+    def test_curso_sin_actividades_y_alumno_sin_cursos_muestran_un_aviso(self):
+        Calificacion.objects.all().delete()
+        Actividad.objects.all().delete()
+        self.assertContains(self.client.get(reverse('alumno_calificaciones')), 'Este curso aún no tiene actividades')
+
+        self.ins_ana.activa = False
+        self.ins_ana.save()
+        self.assertContains(self.client.get(reverse('alumno_calificaciones')), 'Aún no estás inscrito')
+
+    def test_el_menu_enlaza_a_las_calificaciones_y_otro_rol_no_entra(self):
+        respuesta = self.client.get(reverse('alumno_inicio'))
+        self.assertContains(respuesta, f'href="{reverse("alumno_calificaciones")}"')
+        self.assertNotContains(respuesta, 'Próximamente')
+
+        self.client.force_login(self.profesor)
+        self.assertEqual(self.client.get(reverse('alumno_calificaciones')).status_code, 302)
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix='adapt_media_'))
+class EntregaTests(EvaluacionesTestCase):
+    """RF-16: el alumno entrega un archivo hasta la fecha límite y el profesor lo descarga desde la planilla."""
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(settings.MEDIA_ROOT, ignore_errors=True)
+        super().tearDownClass()
+
+    def setUp(self):
+        super().setUp()
+        self.actividad = self.crear_actividad()
+        self.url = reverse('alumno_actividad', args=[self.actividad.pk])
+        self.client.force_login(self.ana)
+
+    def entregar(self, nombre='informe.pdf', contenido=b'%PDF-1.4 prueba'):
+        return self.client.post(self.url, {'archivo': SimpleUploadedFile(nombre, contenido)})
+
+    def vencer(self):
+        Actividad.objects.filter(pk=self.actividad.pk).update(fecha_limite=timezone.now() - timedelta(minutes=1))
+
+    def calificar_a_ana(self, nota='6.0', observacion=''):
+        return Calificacion.objects.create(actividad=self.actividad, inscripcion=self.ins_ana, nota=Decimal(nota),
+                                           registrada_por=self.profesor, observacion=observacion)
+
+    def test_la_pagina_del_curso_lista_las_actividades_visibles_con_su_estado(self):
+        oculta = self.crear_actividad('Oculta', '10')
+        Actividad.objects.filter(pk=oculta.pk).update(visible=False)
+        vencida = self.crear_actividad('Vencida', '10')
+        Actividad.objects.filter(pk=vencida.pk).update(fecha_limite=timezone.now() - timedelta(days=1))
+
+        respuesta = self.client.get(reverse('alumno_curso', args=[self.curso.pk]))
+
+        self.assertEqual([a.titulo for a in respuesta.context['actividades']], ['Vencida', 'Informe'])
+        self.assertContains(respuesta, f'href="{self.url}"')
+        self.assertContains(respuesta, 'Sin entrega')
+        self.assertContains(respuesta, 'Pendiente')
+        self.assertNotContains(respuesta, 'Oculta')
+
+    def test_el_estado_cambia_al_entregar_y_al_calificar(self):
+        self.entregar()
+        pagina = reverse('alumno_curso', args=[self.curso.pk])
+        self.assertContains(self.client.get(pagina), 'Entregada')
+
+        self.calificar_a_ana('6.5')
+
+        respuesta = self.client.get(pagina)
+        self.assertContains(respuesta, 'Calificada')
+        self.assertContains(respuesta, '6,5')
+
+    def test_la_actividad_muestra_las_instrucciones_y_la_nota(self):
+        Actividad.objects.filter(pk=self.actividad.pk).update(descripcion='Lee el capítulo 1')
+        self.calificar_a_ana('3.5', 'Faltó la conclusión')
+
+        respuesta = self.client.get(self.url)
+
+        self.assertContains(respuesta, 'Lee el capítulo 1')
+        self.assertContains(respuesta, 'Faltó la conclusión')
+        self.assertContains(respuesta, '<div class="fs-4 fw-bold text-danger">3,5</div>', html=True)
+
+    def test_entregar_un_archivo(self):
+        respuesta = self.entregar()
+
+        self.assertRedirects(respuesta, self.url, fetch_redirect_response=False)
+        entrega = Entrega.objects.get()
+        self.assertEqual((entrega.actividad, entrega.inscripcion, entrega.nombre_archivo),
+                         (self.actividad, self.ins_ana, 'informe.pdf'))
+        self.assertTrue(os.path.exists(entrega.archivo.path))
+        pagina = self.client.get(self.url)
+        self.assertContains(pagina, 'Tu entrega se guardó')
+        self.assertContains(pagina, 'Reemplazar entrega')
+
+    def test_reemplazar_la_entrega_borra_el_archivo_anterior(self):
+        self.entregar('primero.pdf')
+        anterior = Entrega.objects.get()
+        Entrega.objects.filter(pk=anterior.pk).update(fecha_entrega=timezone.now() - timedelta(days=1))
+
+        self.entregar('segundo.pdf')
+
+        entrega = Entrega.objects.get()
+        self.assertEqual(entrega.nombre_archivo, 'segundo.pdf')
+        self.assertGreater(entrega.fecha_entrega, timezone.now() - timedelta(minutes=1))
+        self.assertFalse(os.path.exists(anterior.archivo.path))
+        self.assertTrue(os.path.exists(entrega.archivo.path))
+
+    def test_despues_de_la_fecha_limite_no_se_entrega_ni_se_reemplaza(self):
+        self.entregar('primero.pdf')
+        self.vencer()
+
+        respuesta = self.entregar('segundo.pdf')
+
+        self.assertRedirects(respuesta, self.url, fetch_redirect_response=False)
+        self.assertEqual(Entrega.objects.get().nombre_archivo, 'primero.pdf')
+        pagina = self.client.get(self.url)
+        self.assertContains(pagina, 'ya no recibe entregas')
+        self.assertContains(pagina, 'El plazo de entrega ya terminó')
+        self.assertNotContains(pagina, 'type="file"')
+
+    def test_despues_de_la_fecha_limite_sin_entrega_se_informa(self):
+        self.vencer()
+
+        self.entregar()
+
+        self.assertFalse(Entrega.objects.exists())
+        self.assertContains(self.client.get(self.url), 'No registras una entrega')
+
+    def test_una_actividad_calificada_no_acepta_cambios_en_la_entrega(self):
+        self.entregar('primero.pdf')
+        self.calificar_a_ana()
+
+        self.entregar('segundo.pdf')
+
+        self.assertEqual(Entrega.objects.get().nombre_archivo, 'primero.pdf')
+        self.assertContains(self.client.get(self.url), 'ya fue calificada')
+
+    def test_rechaza_formatos_no_permitidos_y_archivos_muy_pesados(self):
+        self.assertContains(self.entregar('virus.exe'), 'exe')
+        with mock.patch('cursos.forms.TAMANO_MAXIMO_MB', 0.001):
+            self.assertContains(self.entregar(contenido=b'x' * 2048), 'pesa más de')
+        self.assertFalse(Entrega.objects.exists())
+
+    def test_sin_archivo_lo_pide_y_no_toca_la_entrega_anterior(self):
+        self.entregar()
+        fecha = Entrega.objects.get().fecha_entrega
+
+        respuesta = self.client.post(self.url, {})
+
+        self.assertContains(respuesta, 'Selecciona el archivo')
+        self.assertEqual(Entrega.objects.get().fecha_entrega, fecha)
+
+    def test_un_formulario_en_linea_no_recibe_archivos(self):
+        Actividad.objects.filter(pk=self.actividad.pk).update(tipo=Actividad.Tipo.FORMULARIO)
+
+        self.entregar()
+
+        self.assertFalse(Entrega.objects.exists())
+
+    def test_una_actividad_oculta_o_ajena_responde_404(self):
+        Actividad.objects.filter(pk=self.actividad.pk).update(visible=False)
+        self.assertEqual(self.client.get(self.url).status_code, 404)
+        self.assertEqual(self.entregar().status_code, 404)
+
+        Actividad.objects.filter(pk=self.actividad.pk).update(visible=True)
+        self.ins_ana.activa = False
+        self.ins_ana.save()
+        self.assertEqual(self.client.get(self.url).status_code, 404)
+        self.assertEqual(self.entregar().status_code, 404)
+
+        ajeno = Curso.objects.create(nombre='Ajeno', profesor=self.profesor)
+        modulo = Modulo.objects.create(curso=ajeno, nombre='Tablas')
+        clase = Clase.objects.create(modulo=modulo, titulo='Fórmulas', fecha=timezone.localdate(),
+                                     hora_inicio='09:00', hora_fin='10:30')
+        otra = Actividad.objects.create(clase=clase, titulo='Tarea', ponderacion=Decimal('10'),
+                                        fecha_limite=timezone.now() + timedelta(days=1))
+        self.assertEqual(self.client.get(reverse('alumno_actividad', args=[otra.pk])).status_code, 404)
+        self.assertFalse(Entrega.objects.exists())
+
+    def test_solo_el_alumno_y_su_profesor_descargan_la_entrega(self):
+        self.entregar()
+        descargar = reverse('entrega_descargar', args=[Entrega.objects.get().pk])
+
+        respuesta = self.client.get(descargar)
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertIn('informe.pdf', respuesta['Content-Disposition'])
+        self.client.force_login(self.profesor)
+        self.assertEqual(self.client.get(descargar).status_code, 200)
+
+        admin = Usuario.objects.create_superuser('admin@ejemplo.cl', 'clave-segura-123', primer_nombre='Admin')
+        otro_profesor = crear_usuario('marta@ejemplo.cl', '44444444-4', 'Marta', Rol.PROFESOR)
+        for usuario in [self.luis, otro_profesor, admin]:
+            self.client.force_login(usuario)
+            with self.subTest(usuario=usuario.email):
+                self.assertEqual(self.client.get(descargar).status_code, 404)
+        self.client.logout()
+        self.assertEqual(self.client.get(descargar).status_code, 302)
+
+    def test_ocultar_la_actividad_o_retirar_al_alumno_le_quita_la_descarga(self):
+        self.entregar()
+        descargar = reverse('entrega_descargar', args=[Entrega.objects.get().pk])
+
+        Actividad.objects.filter(pk=self.actividad.pk).update(visible=False)
+        self.assertEqual(self.client.get(descargar).status_code, 404)
+        Actividad.objects.filter(pk=self.actividad.pk).update(visible=True)
+        self.ins_ana.activa = False
+        self.ins_ana.save()
+        self.assertEqual(self.client.get(descargar).status_code, 404)
+
+        self.client.force_login(self.profesor)
+        self.assertEqual(self.client.get(descargar).status_code, 200)
+
+    def test_la_planilla_del_profesor_muestra_quien_entrego(self):
+        self.entregar()
+        entrega = Entrega.objects.get()
+        self.client.force_login(self.profesor)
+
+        respuesta = self.client.get(reverse('actividad_calificar', args=[self.actividad.pk]))
+
+        self.assertContains(respuesta, f'href="{reverse("entrega_descargar", args=[entrega.pk])}"', count=1)
+        self.assertContains(respuesta, 'Sin entrega', count=1)
+
+    def test_una_actividad_con_entregas_no_se_elimina_ni_cambia_de_tipo(self):
+        self.entregar()
+        self.client.force_login(self.profesor)
+
+        respuesta = self.client.post(reverse('actividad_eliminar', args=[self.actividad.pk]), follow=True)
+        self.assertContains(respuesta, 'ya tiene entregas de alumnos')
+        self.assertTrue(Actividad.objects.filter(pk=self.actividad.pk).exists())
+
+        respuesta = self.client.post(reverse('actividad_editar', args=[self.actividad.pk]),
+                                     self.datos_actividad(tipo='formulario'))
+        self.assertContains(respuesta, 'no se puede cambiar el tipo')
+        self.actividad.refresh_from_db()
+        self.assertEqual(self.actividad.tipo, Actividad.Tipo.ARCHIVO)
+
+    def test_la_base_de_datos_rechaza_dos_entregas_del_mismo_alumno(self):
+        Entrega.objects.create(actividad=self.actividad, inscripcion=self.ins_ana)
+
+        with self.assertRaises(IntegrityError):
+            Entrega.objects.create(actividad=self.actividad, inscripcion=self.ins_ana)
+
+    def test_otro_rol_no_entra(self):
+        self.client.force_login(self.profesor)
+
+        self.assertEqual(self.client.get(self.url).status_code, 302)
+
+
+class RespuestasTests(EvaluacionesTestCase):
+    """RF-16: el alumno responde un formulario una sola vez y recibe su nota con escala al 60 %."""
+
+    def setUp(self):
+        super().setUp()
+        self.actividad = Actividad.objects.create(clase=self.clase, titulo='Control', ponderacion=Decimal('20'),
+                                                  tipo=Actividad.Tipo.FORMULARIO,
+                                                  fecha_limite=timezone.now() + timedelta(days=7))
+        self.url = reverse('alumno_actividad', args=[self.actividad.pk])
+        self.client.force_login(self.ana)
+
+    def alternativas(self, puntaje='2', enunciado='¿Cuánto es 2 + 2?'):
+        pregunta = Pregunta.objects.create(actividad=self.actividad, enunciado=enunciado, puntaje=Decimal(puntaje))
+        mala = Alternativa.objects.create(pregunta=pregunta, texto='Tres')
+        buena = Alternativa.objects.create(pregunta=pregunta, texto='Cuatro', es_correcta=True)
+        return pregunta, buena, mala
+
+    def desarrollo(self, puntaje='4'):
+        return Pregunta.objects.create(actividad=self.actividad, enunciado='Explica el concepto', puntaje=Decimal(puntaje),
+                                       tipo=Pregunta.Tipo.DESARROLLO)
+
+    def responder(self, respuestas):
+        return self.client.post(self.url, {f'pregunta_{pregunta.pk}': valor.pk if hasattr(valor, 'pk') else valor
+                                           for pregunta, valor in respuestas})
+
+    def entrega_con_desarrollo(self):
+        """Ana acierta 2 de 2 puntos en alternativas y deja una respuesta de desarrollo de 4 puntos por corregir."""
+        pregunta, buena, _ = self.alternativas()
+        abierta = self.desarrollo()
+        self.responder([(pregunta, buena), (abierta, 'Mi explicación')])
+        self.client.force_login(self.profesor)
+        entrega = Entrega.objects.get()
+        return entrega, reverse('entrega_corregir', args=[entrega.pk]), entrega.respuestas.get(pregunta=abierta)
+
+    def test_el_alumno_ve_las_preguntas_sin_saber_cual_es_la_correcta(self):
+        pregunta, buena, mala = self.alternativas()
+        self.desarrollo()
+
+        respuesta = self.client.get(self.url)
+
+        self.assertContains(respuesta, pregunta.enunciado)
+        self.assertContains(respuesta, 'Tres')
+        self.assertContains(respuesta, 'Cuatro')
+        self.assertContains(respuesta, 'Explica el concepto')
+        self.assertContains(respuesta, 'type="radio"', count=2)
+        self.assertNotContains(respuesta, 'orrecta')
+
+    def test_con_solo_alternativas_la_nota_es_automatica(self):
+        primera, buena, _ = self.alternativas('2')
+        segunda, _, mala = self.alternativas('3', 'Otra pregunta')
+
+        respuesta = self.responder([(primera, buena), (segunda, mala)])
+
+        self.assertRedirects(respuesta, self.url, fetch_redirect_response=False)
+        entrega = Entrega.objects.get()
+        self.assertEqual(sorted(entrega.respuestas.values_list('puntaje_obtenido', flat=True)),
+                         [Decimal('0'), Decimal('2')])
+        # 2 de 5 puntos: 1 + 3 × 2 / 3 = 3,0
+        calificacion = Calificacion.objects.get()
+        self.assertEqual((calificacion.nota, calificacion.inscripcion, calificacion.registrada_por),
+                         (Decimal('3.0'), self.ins_ana, self.profesor))
+        pagina = self.client.get(self.url)
+        self.assertContains(pagina, 'Tus respuestas se enviaron')
+        self.assertContains(pagina, 'Calificada')
+        self.assertContains(pagina, '3,0')
+
+    def test_todas_correctas_dan_un_7_y_cuentan_en_el_promedio(self):
+        pregunta, buena, _ = self.alternativas()
+
+        self.responder([(pregunta, buena)])
+
+        self.assertEqual(Calificacion.objects.get().nota, Decimal('7.0'))
+        resumen = self.client.get(reverse('alumno_calificaciones')).context['cursos'][0]
+        self.assertEqual(resumen['promedio'], Decimal('7.0'))
+
+    def test_despues_de_responder_no_ve_las_respuestas_correctas(self):
+        pregunta, _, mala = self.alternativas()
+
+        self.responder([(pregunta, mala)])
+
+        respuesta = self.client.get(self.url)
+        self.assertNotContains(respuesta, 'Cuatro')
+        self.assertNotContains(respuesta, pregunta.enunciado)
+
+    def test_con_desarrollo_la_nota_espera_la_correccion(self):
+        pregunta, buena, _ = self.alternativas()
+        abierta = self.desarrollo()
+
+        self.responder([(pregunta, buena), (abierta, 'Mi explicación')])
+
+        self.assertFalse(Calificacion.objects.exists())
+        self.assertIsNone(Respuesta.objects.get(pregunta=abierta).puntaje_obtenido)
+        self.assertEqual(Respuesta.objects.get(pregunta=abierta).texto, 'Mi explicación')
+        self.assertContains(self.client.get(self.url), 'cuando tu profesor corrija')
+
+    def test_exige_responder_todas_las_preguntas(self):
+        pregunta, buena, _ = self.alternativas()
+        abierta = self.desarrollo()
+
+        respuesta = self.responder([(pregunta, buena), (abierta, '   ')])
+        self.assertContains(respuesta, 'Escribe tu respuesta')
+        self.assertContains(respuesta, 'checked')
+
+        self.assertContains(self.responder([(abierta, 'Algo')]), 'Elige una alternativa')
+        self.assertFalse(Entrega.objects.exists())
+
+    def test_no_acepta_una_alternativa_de_otra_pregunta(self):
+        primera, _, _ = self.alternativas()
+        _, ajena, _ = self.alternativas(enunciado='Otra')
+
+        self.responder([(primera, ajena)])
+
+        self.assertFalse(Entrega.objects.exists())
+
+    def test_se_responde_una_sola_vez(self):
+        pregunta, buena, mala = self.alternativas()
+        self.responder([(pregunta, mala)])
+
+        respuesta = self.responder([(pregunta, buena)])
+
+        self.assertRedirects(respuesta, self.url, fetch_redirect_response=False)
+        self.assertEqual(Respuesta.objects.get().alternativa, mala)
+        self.assertEqual(Calificacion.objects.get().nota, Decimal('1.0'))
+        pagina = self.client.get(self.url)
+        self.assertContains(pagina, 'ya no recibe entregas')
+        self.assertNotContains(pagina, 'type="radio"')
+
+    def test_fuera_de_plazo_no_se_responde(self):
+        pregunta, buena, _ = self.alternativas()
+        Actividad.objects.filter(pk=self.actividad.pk).update(fecha_limite=timezone.now() - timedelta(minutes=1))
+
+        self.responder([(pregunta, buena)])
+
+        self.assertFalse(Entrega.objects.exists())
+        pagina = self.client.get(self.url)
+        self.assertContains(pagina, 'El plazo de entrega ya terminó')
+        self.assertNotContains(pagina, 'type="radio"')
+
+    def test_sin_preguntas_publicadas_se_informa(self):
+        self.assertContains(self.client.get(self.url), 'aún no publica las preguntas')
+
+    def test_una_nota_manual_previa_cierra_el_formulario(self):
+        pregunta, buena, _ = self.alternativas()
+        Calificacion.objects.create(actividad=self.actividad, inscripcion=self.ins_ana, nota=Decimal('5.0'),
+                                    registrada_por=self.profesor)
+
+        self.responder([(pregunta, buena)])
+
+        self.assertFalse(Entrega.objects.exists())
+        self.assertContains(self.client.get(self.url), 'ya no se puede responder')
+
+    def test_la_planilla_lleva_a_corregir_y_luego_a_ver_las_respuestas(self):
+        entrega, corregir, abierta = self.entrega_con_desarrollo()
+        planilla = reverse('actividad_calificar', args=[self.actividad.pk])
+
+        respuesta = self.client.get(planilla)
+        self.assertContains(respuesta, f'href="{corregir}"')
+        self.assertContains(respuesta, 'Corregir')
+        self.assertContains(respuesta, 'Sin entrega', count=1)
+
+        self.client.post(corregir, {f'puntaje_{abierta.pk}': '2'})
+        self.assertContains(self.client.get(planilla), 'Ver respuestas')
+
+    def test_el_profesor_ve_las_respuestas_y_cual_era_la_correcta(self):
+        _, corregir, _ = self.entrega_con_desarrollo()
+
+        respuesta = self.client.get(corregir)
+
+        self.assertContains(respuesta, 'Ana Pérez')
+        self.assertContains(respuesta, 'Mi explicación')
+        self.assertContains(respuesta, 'Respuesta del alumno')
+        self.assertContains(respuesta, 'bi-check-circle-fill')
+        self.assertContains(respuesta, 'Faltan puntajes')
+
+    def test_corregir_el_desarrollo_calcula_la_nota(self):
+        _, corregir, abierta = self.entrega_con_desarrollo()
+
+        respuesta = self.client.post(corregir, {f'puntaje_{abierta.pk}': '2,5'}, follow=True)
+
+        # 4,5 de 6 puntos: 4 + 3 × 0,9 / 2,4 = 5,1
+        calificacion = Calificacion.objects.get()
+        self.assertEqual((calificacion.nota, calificacion.registrada_por), (Decimal('5.1'), self.profesor))
+        abierta.refresh_from_db()
+        self.assertEqual(abierta.puntaje_obtenido, Decimal('2.5'))
+        self.assertContains(respuesta, 'nota 5,1')
+
+    def test_volver_a_corregir_actualiza_la_nota_y_conserva_la_observacion(self):
+        _, corregir, abierta = self.entrega_con_desarrollo()
+        self.client.post(corregir, {f'puntaje_{abierta.pk}': '0'})
+        Calificacion.objects.update(observacion='Revisa el capítulo 2')
+
+        self.client.post(corregir, {f'puntaje_{abierta.pk}': '4'})
+
+        calificacion = Calificacion.objects.get()
+        self.assertEqual((calificacion.nota, calificacion.observacion), (Decimal('7.0'), 'Revisa el capítulo 2'))
+
+    def test_el_puntaje_debe_estar_entre_0_y_el_de_la_pregunta(self):
+        _, corregir, abierta = self.entrega_con_desarrollo()
+        for puntaje, error in [('', 'Asigne el puntaje'), ('4,5', 'El máximo de esta pregunta es 4'),
+                               ('-1', 'no puede ser negativo'), ('1,55', 'Use un solo decimal'), ('dos', 'puntaje válido')]:
+            with self.subTest(puntaje=puntaje):
+                self.assertContains(self.client.post(corregir, {f'puntaje_{abierta.pk}': puntaje}), error)
+        self.assertFalse(Calificacion.objects.exists())
+
+    def test_con_solo_alternativas_no_hay_nada_que_corregir(self):
+        pregunta, buena, _ = self.alternativas()
+        self.responder([(pregunta, buena)])
+        Calificacion.objects.update(nota=Decimal('5.0'))
+        corregir = reverse('entrega_corregir', args=[Entrega.objects.get().pk])
+        self.client.force_login(self.profesor)
+
+        self.assertNotContains(self.client.get(corregir), 'Guardar corrección')
+        self.client.post(corregir, {})
+        self.assertEqual(Calificacion.objects.get().nota, Decimal('5.0'))
+
+    def test_solo_el_profesor_del_curso_corrige(self):
+        _, corregir, abierta = self.entrega_con_desarrollo()
+
+        self.client.force_login(crear_usuario('marta@ejemplo.cl', '44444444-4', 'Marta', Rol.PROFESOR))
+        self.assertEqual(self.client.post(corregir, {f'puntaje_{abierta.pk}': '4'}).status_code, 404)
+        self.client.force_login(self.ana)
+        self.assertEqual(self.client.get(corregir).status_code, 302)
+        self.assertFalse(Calificacion.objects.exists())
+
+    def test_una_entrega_de_archivo_no_se_corrige_aqui(self):
+        actividad = self.crear_actividad('Informe', '10')
+        entrega = Entrega.objects.create(actividad=actividad, inscripcion=self.ins_ana)
+        self.client.force_login(self.profesor)
+
+        self.assertEqual(self.client.get(reverse('entrega_corregir', args=[entrega.pk])).status_code, 404)
+
+    def test_con_respuestas_las_preguntas_no_se_modifican(self):
+        pregunta, buena, _ = self.alternativas()
+        self.responder([(pregunta, buena)])
+        self.client.force_login(self.profesor)
+        datos = {'enunciado': 'Cambiada', 'tipo': 'desarrollo', 'puntaje': '1'}
+
+        acciones = [(reverse('pregunta_crear', args=[self.actividad.pk]), datos),
+                    (reverse('pregunta_editar', args=[pregunta.pk]), datos),
+                    (reverse('pregunta_eliminar', args=[pregunta.pk]), {}),
+                    (reverse('pregunta_mover', args=[pregunta.pk, 'bajar']), {})]
+        for url, contenido in acciones:
+            with self.subTest(url=url):
+                self.assertContains(self.client.post(url, contenido, follow=True), 'no se pueden modificar')
+
+        pregunta.refresh_from_db()
+        self.assertEqual(pregunta.enunciado, '¿Cuánto es 2 + 2?')
+        self.assertEqual(self.actividad.preguntas.count(), 1)
+        self.assertEqual(pregunta.alternativas.count(), 2)
+        pagina = self.client.get(reverse('actividad_formulario', args=[self.actividad.pk]))
+        self.assertNotContains(pagina, reverse('pregunta_crear', args=[self.actividad.pk]))
+        self.assertNotContains(pagina, reverse('pregunta_eliminar', args=[pregunta.pk]))
+
+    def test_la_base_de_datos_rechaza_dos_respuestas_a_una_pregunta(self):
+        pregunta, buena, _ = self.alternativas()
+        self.responder([(pregunta, buena)])
+
+        with self.assertRaises(IntegrityError):
+            Respuesta.objects.create(entrega=Entrega.objects.get(), pregunta=pregunta, alternativa=buena)

@@ -7,7 +7,7 @@ from django.utils import timezone
 from usuarios.forms import EstiloBootstrapMixin
 from usuarios.models import Rol, Usuario
 
-from .models import Asistencia, BloqueHorario, Clase, Curso, Inscripcion, Material, Modulo
+from .models import Asistencia, BloqueHorario, Clase, Curso, Inscripcion, Material, MensajeForo, Modulo, TemaForo
 
 
 class ProfesorChoiceField(forms.ModelChoiceField):
@@ -111,6 +111,11 @@ EXTENSIONES_PERMITIDAS = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 't
                           'gif', 'zip']
 
 
+def validar_tamano(archivo):
+    if archivo.size > TAMANO_MAXIMO_MB * 1024 * 1024:
+        raise forms.ValidationError(f'El archivo pesa más de {TAMANO_MAXIMO_MB} MB.')
+
+
 class MaterialForm(EstiloBootstrapMixin, forms.ModelForm):
     """RF-10: archivo, enlace o carpeta de una clase. El tipo no cambia al editar."""
 
@@ -126,19 +131,13 @@ class MaterialForm(EstiloBootstrapMixin, forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields['archivo'].validators.append(FileExtensionValidator(EXTENSIONES_PERMITIDAS))
+        self.fields['archivo'].validators.extend([FileExtensionValidator(EXTENSIONES_PERMITIDAS), validar_tamano])
         if self.instance.pk:
             self.fields['tipo'].disabled = True
         elif self.instance.carpeta_id:
             # Las carpetas tienen un solo nivel
             self.fields['tipo'].choices = [opcion for opcion in Material.Tipo.choices
                                            if opcion[0] != Material.Tipo.CARPETA]
-
-    def clean_archivo(self):
-        archivo = self.cleaned_data.get('archivo')
-        if archivo and archivo.size > TAMANO_MAXIMO_MB * 1024 * 1024:
-            raise forms.ValidationError(f'El archivo pesa más de {TAMANO_MAXIMO_MB} MB.')
-        return archivo
 
     def clean(self):
         datos = super().clean()
@@ -236,3 +235,31 @@ class BloqueHorarioForm(EstiloBootstrapMixin, forms.ModelForm):
                                  f'({choque.get_dia_semana_display()} {choque.hora_inicio:%H:%M} '
                                  f'a {choque.hora_fin:%H:%M}).')
         return datos
+
+
+class MensajeForoForm(EstiloBootstrapMixin, forms.ModelForm):
+    """RF-16: respuesta en un tema del foro."""
+
+    class Meta:
+        model = MensajeForo
+        fields = ['contenido']
+        labels = {'contenido': 'Mensaje'}
+        widgets = {'contenido': forms.Textarea(attrs={'rows': 4})}
+
+
+class TemaForoForm(EstiloBootstrapMixin, forms.ModelForm):
+    """RF-16: un tema nace con su primer mensaje."""
+
+    contenido = MensajeForo._meta.get_field('contenido').formfield(label='Mensaje',
+                                                                   widget=forms.Textarea(attrs={'rows': 6}))
+
+    class Meta:
+        model = TemaForo
+        fields = ['titulo']
+        labels = {'titulo': 'Título del tema'}
+
+    @transaction.atomic
+    def save(self, commit=True):
+        tema = super().save(commit)
+        MensajeForo.objects.create(tema=tema, autor=tema.autor, contenido=self.cleaned_data['contenido'])
+        return tema

@@ -1,0 +1,50 @@
+"""Actividades del alumno: instrucciones, entrega de archivos y nota (RF-16)."""
+from django.contrib import messages
+from django.shortcuts import get_object_or_404, redirect, render
+
+from cursos.models import Inscripcion
+from usuarios.views import alumno_required
+
+from .forms import EntregaForm, RespuestasForm
+from .models import Actividad
+
+
+def formulario_de_entrega(request, actividad):
+    datos = (request.POST, request.FILES) if request.method == 'POST' else ()
+    if actividad.tipo == Actividad.Tipo.FORMULARIO:
+        return RespuestasForm(actividad, *datos)
+    return EntregaForm(*datos)
+
+
+@alumno_required
+def alumno_actividad_view(request, pk):
+    """Solo actividades visibles de sus cursos; el resto responde 404."""
+    actividad = get_object_or_404(Actividad.objects.select_related('clase__modulo__curso'), pk=pk, visible=True)
+    curso = actividad.curso
+    inscripcion = get_object_or_404(Inscripcion, curso=curso, alumno=request.user, activa=True, curso__activo=True)
+    entrega = inscripcion.entregas.filter(actividad=actividad).first()
+    calificacion = inscripcion.calificaciones.filter(actividad=actividad).first()
+    # Ya calificada no se cambia: la nota debe corresponder a lo que revisó el profesor
+    puede_entregar = actividad.abierta and not calificacion
+    if actividad.tipo == Actividad.Tipo.FORMULARIO:
+        # Se responde una sola vez, y las preguntas ya deben estar publicadas
+        puede_entregar = puede_entregar and not entrega and actividad.preguntas.exists()
+
+    form = formulario_de_entrega(request, actividad)
+    if request.method == 'POST':
+        if not puede_entregar:
+            messages.error(request, 'Esta actividad ya no recibe entregas.')
+            return redirect('alumno_actividad', pk=actividad.pk)
+        if form.is_valid():
+            form.save(actividad, inscripcion)
+            messages.success(request, form.mensaje_exito)
+            return redirect('alumno_actividad', pk=actividad.pk)
+
+    return render(request, 'evaluaciones/actividad_alumno.html', {
+        'actividad': actividad,
+        'curso': curso,
+        'entrega': entrega,
+        'calificacion': calificacion,
+        'puede_entregar': puede_entregar,
+        'form': form,
+    })

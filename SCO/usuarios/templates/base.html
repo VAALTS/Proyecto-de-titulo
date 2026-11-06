@@ -49,16 +49,58 @@
             box-shadow: 0 .75rem 1.5rem rgba(0, 0, 0, .15);
         }
         .menu-icon { font-size: 3.5rem; }
+
+        /* Barra del alumno: la página actual se marca con una línea blanca bajo el enlace */
+        .navbar-principal .nav-link {
+            color: rgba(255, 255, 255, .9);
+            font-weight: 500;
+            border-bottom: 3px solid transparent;
+        }
+        .navbar-principal .nav-link:hover,
+        .navbar-principal .nav-link:focus { color: #fff; border-bottom-color: rgba(255, 255, 255, .5); }
+        .navbar-principal .nav-link.active { color: #fff; border-bottom-color: #fff; }
+
+        /* Container de los cursos del alumno (menú) */
+        .contenedor-cursos { border-radius: .75rem; }
+        .tarjeta-curso { border-radius: .5rem; transition: transform .2s, box-shadow .2s; }
+        .tarjeta-curso:hover { transform: translateY(-4px); box-shadow: 0 .5rem 1.25rem rgba(0, 0, 0, .15); }
+        [data-bs-theme="dark"] .tarjeta-curso:hover { box-shadow: 0 .5rem 1.25rem rgba(0, 0, 0, .5); }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
 <body>
 
-    <nav class="navbar navbar-dark navbar-principal shadow-sm">
+    <nav class="navbar navbar-expand-md navbar-dark navbar-principal shadow-sm">
         <div class="container">
             <a class="navbar-brand fw-bold" href="{% url 'home' %}">
                 <img src="{% static 'images/logo_adapt_blanco.png' %}" class="img-fluid" alt="LogoAdaptPNG" style="max-height: 70px;" >
             </a>
+
+            {# Navegación del alumno: Horario y Calificaciones se abren desde la barra #}
+            {% if user.rol == 'alumno' %}
+                <button class="navbar-toggler ms-auto me-2" type="button" data-bs-toggle="collapse" data-bs-target="#navAlumno"
+                        aria-controls="navAlumno" aria-expanded="false" aria-label="Mostrar navegación">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                {% with pagina=request.resolver_match.url_name %}
+                <div class="collapse navbar-collapse order-last order-md-0" id="navAlumno">
+                    <ul class="navbar-nav me-auto ms-md-3 gap-md-2">
+                        <li class="nav-item">
+                            <a class="nav-link{% if pagina == 'alumno_inicio' or pagina == 'alumno_cursos' or pagina == 'alumno_curso' %} active" aria-current="page{% endif %}"
+                               href="{% url 'alumno_inicio' %}"><i class="bi bi-house-door me-1"></i>Inicio</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link{% if pagina == 'alumno_horario' %} active" aria-current="page{% endif %}"
+                               href="{% url 'alumno_horario' %}"><i class="bi bi-calendar-week me-1"></i>Horario</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link{% if pagina == 'alumno_calificaciones' %} active" aria-current="page{% endif %}"
+                               href="{% url 'alumno_calificaciones' %}"><i class="bi bi-clipboard-data me-1"></i>Calificaciones</a>
+                        </li>
+                    </ul>
+                </div>
+                {% endwith %}
+            {% endif %}
 
             <div class="d-flex align-items-center gap-2">
             {# Botón de modo día/noche #}

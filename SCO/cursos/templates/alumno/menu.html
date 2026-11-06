@@ -3,23 +3,76 @@
 {% block title %}Menú del alumno{% endblock %}
 
 {% block content %}
-<div class="text-center mb-5">
-    <h2 class="fw-bold">Hola, {{ user.primer_nombre }}</h2>
-</div>
+<div class="mx-auto" style="max-width: 1000px;">
+    <h2 class="fw-bold mb-3">¡Hola, {{ user.primer_nombre }}!</h2>
 
-{# RF-13: una columna en celulares, tres desde pantallas medianas #}
-<div class="row g-4 justify-content-center">
-    {% for seccion in secciones %}
-        <div class="col-12 col-md-4">
-            <div class="card menu-card h-100 text-center p-3">
-                <div class="card-body d-flex flex-column">
-                    <i class="bi {{ seccion.icono }} menu-icon text-{{ seccion.color }}"></i>
-                    <h5 class="card-title mt-3">{{ seccion.titulo }}</h5>
-                    <p class="text-muted small">{{ seccion.descripcion }}</p>
-                    <a href="{% url seccion.url %}" class="btn btn-{{ seccion.color }} mt-auto stretched-link">Ingresar</a>
+    {# RF-13: los cursos en que está inscrito el alumno; Horario y Calificaciones están en la barra #}
+    <div class="card contenedor-cursos shadow-sm">
+        <div class="card-body p-3 p-md-4">
+            <h5 class="pb-3 mb-3 border-bottom">Mis cursos</h5>
+
+            {% if cursos %}
+                <div class="mb-3" style="max-width: 320px;">
+                    <label for="buscarCurso" class="visually-hidden">Buscar curso</label>
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="search" class="form-control" id="buscarCurso" placeholder="Buscar" autocomplete="off">
+                    </div>
                 </div>
-            </div>
+
+                <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 g-3">
+                    {% for curso in cursos %}
+                        <div class="col" data-curso="{{ curso.nombre|lower }}">
+                            <div class="card tarjeta-curso h-100">
+                                <div class="card-body d-flex flex-column">
+                                    <h6 class="card-title">
+                                        <a href="{% url 'alumno_curso' curso.pk %}" class="stretched-link text-reset text-decoration-none">
+                                            {{ curso.nombre }}
+                                        </a>
+                                    </h6>
+                                    <p class="small text-body-secondary flex-grow-1 mb-2">
+                                        {{ curso.descripcion|truncatechars:100|default:'Sin descripción.' }}
+                                    </p>
+                                    <span class="small text-body-secondary">
+                                        <i class="bi bi-person-workspace me-1"></i>{{ curso.profesor.get_short_name }}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+                <p class="text-body-secondary text-center py-4 mb-0 d-none" id="sinResultados">
+                    Ningún curso coincide con la búsqueda.
+                </p>
+            {% else %}
+                <p class="text-body-secondary text-center py-5 mb-0">
+                    Aún no estás inscrito en ningún curso. El administrador te inscribe en tus capacitaciones.
+                </p>
+            {% endif %}
         </div>
-    {% endfor %}
+    </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+{% if cursos %}
+<script>
+    (() => {
+        // Filtra las tarjetas por nombre, sin importar tildes ni mayúsculas
+        const normalizar = (texto) => texto.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+        const buscador = document.getElementById('buscarCurso');
+        const tarjetas = document.querySelectorAll('[data-curso]');
+        buscador.addEventListener('input', () => {
+            const busqueda = normalizar(buscador.value.trim());
+            let visibles = 0;
+            tarjetas.forEach((tarjeta) => {
+                const coincide = normalizar(tarjeta.dataset.curso).includes(busqueda);
+                tarjeta.classList.toggle('d-none', !coincide);
+                visibles += coincide;
+            });
+            document.getElementById('sinResultados').classList.toggle('d-none', visibles > 0);
+        });
+    })();
+</script>
+{% endif %}
 {% endblock %}

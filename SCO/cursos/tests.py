@@ -767,14 +767,28 @@ class MenuAlumnoTests(TestCase):
         self.profesor = crear_usuario('pedro@ejemplo.cl', '11111111-1', 'Pedro', Rol.PROFESOR)
         self.client.force_login(self.alumno)
 
-    def test_el_menu_tiene_los_tres_accesos_del_requerimiento(self):
+    def test_horario_y_calificaciones_estan_en_la_barra(self):
         respuesta = self.client.get(reverse('alumno_inicio'))
 
-        for titulo in ['Cursos', 'Horario', 'Calificaciones']:
-            with self.subTest(seccion=titulo):
-                self.assertContains(respuesta, f'<h5 class="card-title mt-3">{titulo}</h5>', html=True)
-        self.assertContains(respuesta, f'href="{reverse("alumno_cursos")}"')
-        self.assertContains(respuesta, 'col-12 col-md-4')
+        for nombre_url in ['alumno_inicio', 'alumno_horario', 'alumno_calificaciones']:
+            with self.subTest(pagina=nombre_url):
+                self.assertContains(respuesta, f'href="{reverse(nombre_url)}"')
+        self.assertContains(respuesta, 'id="navAlumno"')
+
+    def test_el_menu_muestra_los_cursos_del_alumno(self):
+        vigente = Curso.objects.create(nombre='Liderazgo', profesor=self.profesor)
+        Curso.objects.create(nombre='Ajeno', profesor=self.profesor)
+        Inscripcion.objects.create(alumno=self.alumno, curso=vigente)
+
+        respuesta = self.client.get(reverse('alumno_inicio'))
+
+        self.assertEqual(list(respuesta.context['cursos']), [vigente])
+        self.assertContains(respuesta, f'href="{reverse("alumno_curso", args=[vigente.pk])}"')
+        self.assertNotContains(respuesta, 'Ajeno')
+
+    def test_otros_roles_no_ven_la_barra_del_alumno(self):
+        self.client.force_login(self.profesor)
+        self.assertNotContains(self.client.get(reverse('profesor_inicio')), 'id="navAlumno"')
 
     def test_al_ingresar_el_alumno_llega_a_su_menu(self):
         self.client.logout()

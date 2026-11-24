@@ -40,6 +40,8 @@ INSTALLED_APPS = [
     'usuarios',
     'cursos',
     'evaluaciones',
+    'notificaciones',
+    'api',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -143,6 +145,11 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Autenticación
 AUTH_USER_MODEL = 'usuarios.Usuario'
+
+# Direcciones desde las que la aplicación móvil puede usar la API (CORS), separadas por coma.
+# En desarrollo, sin definirla, se permite cualquier origen.
+APP_ORIGINS = [origen.strip() for origen in os.environ.get('APP_ORIGINS', '*' if DEBUG else '').split(',')
+               if origen.strip()]
 LOGIN_URL = 'login'            # a dónde manda @login_required si no hay sesión
 LOGIN_REDIRECT_URL = 'home'     # a dónde va tras iniciar sesión
 LOGOUT_REDIRECT_URL = 'login'   # a dónde va tras cerrar sesión

@@ -1,0 +1,8 @@
+.git
+.venv
+.env
+.claude
+.vscode
+media
+staticfiles
+**/__pycache__

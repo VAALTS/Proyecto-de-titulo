@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 
 import os
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from dotenv import load_dotenv
 
@@ -32,6 +33,19 @@ SECRET_KEY = os.environ['SECRET_KEY']
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = [host for host in os.environ.get('ALLOWED_HOSTS', '').split(',') if host]
+CSRF_TRUSTED_ORIGINS = [origen for origen in os.environ.get('CSRF_TRUSTED_ORIGINS', '').split(',') if origen]
+
+# Publicación en Railway: el dominio público llega en esta variable, que Railway define sola
+DOMINIO_PUBLICO = os.environ.get('RAILWAY_PUBLIC_DOMAIN', '')
+if DOMINIO_PUBLICO:
+    ALLOWED_HOSTS.append(DOMINIO_PUBLICO)
+    CSRF_TRUSTED_ORIGINS.append(f'https://{DOMINIO_PUBLICO}')
+
+if not DEBUG:
+    # El hosting atiende HTTPS y le pasa la petición a Django por dentro; así Django sabe que fue HTTPS
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
 
 
 # Application definition
@@ -52,6 +66,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # Entrega los archivos estáticos (CSS, imágenes) en producción
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -86,14 +102,18 @@ WSGI_APPLICATION = 'Main.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
+# En el computador se usan DB_NAME, DB_USER, etc. del .env. En Railway basta con MYSQL_URL
+# (mysql://usuario:clave@servidor:puerto/base), que entrega el servicio de MySQL.
+_url_mysql = urlparse(os.environ.get('MYSQL_URL', ''))
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': os.environ['DB_NAME'],
-        'USER': os.environ['DB_USER'],
-        'PASSWORD': os.environ['DB_PASSWORD'],
-        'HOST': os.environ.get('DB_HOST', 'localhost'),
-        'PORT': os.environ.get('DB_PORT', '3306'),
+        'NAME': _url_mysql.path.lstrip('/') if _url_mysql.hostname else os.environ.get('DB_NAME', ''),
+        'USER': unquote(_url_mysql.username or '') if _url_mysql.hostname else os.environ.get('DB_USER', ''),
+        'PASSWORD': unquote(_url_mysql.password or '') if _url_mysql.hostname else os.environ.get('DB_PASSWORD', ''),
+        'HOST': _url_mysql.hostname or os.environ.get('DB_HOST', 'localhost'),
+        'PORT': str(_url_mysql.port or os.environ.get('DB_PORT', '3306')),
+        'OPTIONS': {'charset': 'utf8mb4'},
     }
 }
 
@@ -133,6 +153,15 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
 STATIC_URL = 'static/'
+# Carpeta donde `collectstatic` junta los estáticos para producción
+STATIC_ROOT = BASE_DIR.parent / 'staticfiles'
+STORAGES = {
+    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+    'staticfiles': {'BACKEND': 'whitenoise.storage.CompressedStaticFilesStorage'},
+}
+
+# La aplicación móvil (PWA) se publica en /app/ desde esta carpeta
+APP_MOVIL_DIR = BASE_DIR.parent / 'app_movil'
 
 # Archivos subidos (material de clases, entregas). No tienen URL pública: se descargan
 # a través de una vista que revisa los permisos de quien descarga (RF-10 y RF-16).

@@ -11,3 +11,6 @@ __pycache__/
 
 # Archivos subidos por los usuarios (material de clases y entregas)
 /media/
+
+# Estáticos generados por collectstatic
+/staticfiles/

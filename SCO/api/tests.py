@@ -220,3 +220,19 @@ class ContactoTests(ApiTestCase):
         respuesta = self.post('api_contacto', {'mensaje': 'Otra vez'}, token)
         self.assertEqual(respuesta.status_code, 429)
         self.assertEqual(SolicitudContacto.objects.count(), 1)
+
+
+class AppMovilTests(TestCase):
+    """La aplicación móvil se publica en /app/, en la misma dirección que la web y la API."""
+
+    def test_entrega_la_app_y_sus_archivos(self):
+        self.assertRedirects(self.client.get('/app'), '/app/', fetch_redirect_response=False)
+        respuesta = self.client.get('/app/')
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertIn(b'Adapt Academy', b''.join(respuesta.streaming_content))
+        self.assertEqual(self.client.get('/app/config.js')['Cache-Control'], 'no-cache')
+        self.assertEqual(self.client.get('/app/manifest.webmanifest').status_code, 200)
+
+    def test_no_entrega_archivos_fuera_de_la_carpeta(self):
+        for ruta in ['/app/../.env', '/app/..%2f.env', '/app/no-existe.js']:
+            self.assertIn(self.client.get(ruta).status_code, (400, 404), ruta)

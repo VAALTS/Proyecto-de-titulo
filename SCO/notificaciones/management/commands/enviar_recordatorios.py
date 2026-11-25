@@ -1,4 +1,4 @@
-"""Recordatorios automáticos al teléfono (RF-07 y RF-08 de la aplicación móvil).
+"""Recordatorios automáticos en la bandeja de la app y en el teléfono (RF-07 y RF-08 de la aplicación móvil).
 
 - RF-07: actividad pendiente, cuando falta 1 día, 12 horas, 3 horas y 1 hora para la entrega.
 - RF-08: próxima clase, 1 hora, 30 minutos y 5 minutos antes (según el horario semanal del curso).
@@ -21,8 +21,8 @@ from django.utils import timezone
 from cursos.models import BloqueHorario, Inscripcion
 from evaluaciones.models import Actividad, Entrega
 
-from ...models import Dispositivo, RecordatorioEnviado
-from ...push import enviar, push_activo
+from ...models import RecordatorioEnviado
+from ...push import enviar, guardar_en_bandeja
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,14 @@ def marcar(usuario_id, clave):
         return False
 
 
-def recordatorios_de_actividades(ahora, con_telefono):
+def avisar(usuario_id, titulo, cuerpo, etiqueta):
+    """Deja el recordatorio en la bandeja y lo envía al teléfono, si tiene uno registrado."""
+    guardar_en_bandeja([usuario_id], titulo, cuerpo)
+    enviar([usuario_id], titulo, cuerpo, etiqueta=etiqueta)
+    return 1
+
+
+def recordatorios_de_actividades(ahora):
     enviados = 0
     actividades = (Actividad.objects.filter(visible=True, clase__modulo__curso__activo=True,
                                             fecha_limite__gt=ahora, fecha_limite__lte=ahora + timedelta(days=1))
@@ -62,20 +69,20 @@ def recordatorios_de_actividades(ahora, con_telefono):
         texto = aviso_que_toca(actividad.fecha_limite - ahora, AVISOS_ACTIVIDAD)
         curso = actividad.clase.modulo.curso
         entregaron = set(Entrega.objects.filter(actividad=actividad).values_list('inscripcion__alumno_id', flat=True))
-        alumnos = (Inscripcion.objects.filter(curso=curso, activa=True, alumno_id__in=con_telefono)
+        alumnos = (Inscripcion.objects.filter(curso=curso, activa=True)
                    .exclude(alumno_id__in=entregaron).values_list('alumno_id', flat=True))
         fecha = timezone.localtime(actividad.fecha_limite)
         for alumno_id in alumnos:
             if marcar(alumno_id, f'actividad-{actividad.pk}-{texto}'):
-                enviados += enviar(
-                    [alumno_id], f'Falta{"" if texto.startswith("1 ") else "n"} {texto} para la entrega',
+                enviados += avisar(
+                    alumno_id, f'Falta{"" if texto.startswith("1 ") else "n"} {texto} para la entrega',
                     f'Recuerde que tiene una actividad pendiente «{actividad.titulo}» del curso {curso.nombre} '
                     f'con fecha de entrega el {DIAS[fecha.weekday()]} {fecha:%d/%m a las %H:%M}.',
                     etiqueta=f'actividad-{actividad.pk}')
     return enviados
 
 
-def recordatorios_de_clases(ahora, con_telefono):
+def recordatorios_de_clases(ahora):
     enviados = 0
     hoy = timezone.localtime(ahora)
     bloques = BloqueHorario.objects.filter(dia_semana=hoy.isoweekday(), curso__activo=True).select_related('curso')
@@ -87,15 +94,13 @@ def recordatorios_de_clases(ahora, con_telefono):
         texto = aviso_que_toca(falta, AVISOS_CLASE)
         if not texto:
             continue
-        personas = set(Inscripcion.objects.filter(curso=bloque.curso, activa=True, alumno_id__in=con_telefono)
-                       .values_list('alumno_id', flat=True))
-        if bloque.curso.profesor_id in con_telefono:
-            personas.add(bloque.curso.profesor_id)
+        personas = set(Inscripcion.objects.filter(curso=bloque.curso, activa=True).values_list('alumno_id', flat=True))
+        personas.add(bloque.curso.profesor_id)
         lugar = f' ({bloque.sala})' if bloque.sala else ''
         for persona_id in personas:
             if marcar(persona_id, f'clase-{bloque.pk}-{hoy:%Y%m%d}-{texto}'):
-                enviados += enviar(
-                    [persona_id], f'Tu clase comienza en {texto}',
+                enviados += avisar(
+                    persona_id, f'Tu clase comienza en {texto}',
                     f'Recuerde conectarse a la clase de {bloque.curso.nombre} a realizarse a las '
                     f'{bloque.hora_inicio:%H:%M} horas{lugar}.',
                     etiqueta=f'clase-{bloque.pk}')
@@ -103,13 +108,8 @@ def recordatorios_de_clases(ahora, con_telefono):
 
 
 def revisar():
-    if not push_activo():
-        return 0
     ahora = timezone.now()
-    con_telefono = set(Dispositivo.objects.values_list('usuario_id', flat=True))
-    if not con_telefono:
-        return 0
-    return recordatorios_de_actividades(ahora, con_telefono) + recordatorios_de_clases(ahora, con_telefono)
+    return recordatorios_de_actividades(ahora) + recordatorios_de_clases(ahora)
 
 
 class Command(BaseCommand):

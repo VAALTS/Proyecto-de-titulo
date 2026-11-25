@@ -1,4 +1,4 @@
-"""Envío de notificaciones push (Web Push) a los teléfonos donde se instaló la aplicación móvil.
+"""Avisos de la aplicación móvil: quedan en la bandeja de la app (la campanita) y llegan como push al teléfono.
 
 Funcionan con las claves VAPID de las variables VAPID_PUBLIC_KEY y VAPID_PRIVATE_KEY
 (se generan con `python manage.py generar_claves_push`). Sin ellas, no se envía nada.
@@ -11,7 +11,7 @@ from django.conf import settings
 from django.db import connection, transaction
 from pywebpush import WebPushException, webpush
 
-from .models import Dispositivo
+from .models import Dispositivo, Notificacion
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +49,19 @@ def enviar(usuarios_ids, titulo, cuerpo, url='/app/', etiqueta=None):
     return entregadas
 
 
-def enviar_despues(usuarios_ids, titulo, cuerpo, url='/app/', etiqueta=None):
-    """Envía en segundo plano cuando termina de guardarse el cambio, sin hacer esperar a quien lo hizo."""
-    if not push_activo():
-        return
+def guardar_en_bandeja(usuarios_ids, titulo, cuerpo):
+    """Deja el aviso en la bandeja de la app de cada usuario (se ve aunque el teléfono no reciba push)."""
+    Notificacion.objects.bulk_create(Notificacion(usuario_id=usuario_id, titulo=titulo[:150], cuerpo=cuerpo[:300])
+                                     for usuario_id in set(usuarios_ids))
+
+
+def notificar(usuarios_ids, titulo, cuerpo, url='/app/', etiqueta=None):
+    """Guarda el aviso en la bandeja y lo envía al teléfono en segundo plano, sin hacer esperar a quien lo causó."""
     ids = list(set(usuarios_ids))
     if not ids:
+        return
+    guardar_en_bandeja(ids, titulo, cuerpo)
+    if not push_activo():
         return
 
     def tarea():

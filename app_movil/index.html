@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Adapt Academy</title>
+<meta name="color-scheme" content="only light">
 <link rel="manifest" href="manifest.webmanifest">
 <script src="./config.js"></script>
 <script>if ('serviceWorker' in navigator) window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });</script>
@@ -24,6 +25,9 @@
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&amp;family=Saira:wght@500;600;700&amp;display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400,0..1,0&amp;display=block" rel="stylesheet">
 <style>
+:root{color-scheme:only light}
+/* Si el teléfono igual oscurece la app, el logo (letras grises) queda sobre un fondo blanco y se sigue viendo */
+@media (prefers-color-scheme:dark){img[src$="adapt-logo.png"]{background:#fff;border-radius:12px;padding:6px 10px;box-sizing:content-box}}
 body{margin:0;background:#efeeea;font-family:'Figtree',sans-serif;color:#1f2328;-webkit-font-smoothing:antialiased}
 *{box-sizing:border-box}
 a{color:#2e6cc1;text-decoration:none}
@@ -172,7 +176,7 @@ input,textarea,button{font-family:inherit}
 <sc-if value="{{ isApp }}" hint-placeholder-val="{{ false }}">
 <div style="height:56px;display:flex;align-items:center;gap:4px;padding:0 12px 0 16px">
 <button onClick="{{ goHome }}" aria-label="Inicio" style="border:0;background:none;padding:0;cursor:pointer;display:flex;margin-right:auto"><img src="assets/adapt-logo.png" alt="Adapt" style="height:24px;width:auto"></button>
-<button onClick="{{ bell }}" aria-label="Notificaciones" style="width:44px;height:44px;border:0;background:none;cursor:pointer;display:grid;place-items:center;color:#1f2328;position:relative"><span style="font-family:'Material Symbols Rounded';font-size:25px;line-height:1;">notifications</span><span style="position:absolute;top:10px;right:11px;width:8px;height:8px;border-radius:50%;background:#f65b47"></span></button>
+<button onClick="{{ bell }}" aria-label="Notificaciones" style="width:44px;height:44px;border:0;background:none;cursor:pointer;display:grid;place-items:center;color:#1f2328;position:relative"><span style="font-family:'Material Symbols Rounded';font-size:25px;line-height:1;">notifications</span><sc-if value="{{ bellCount }}" hint-placeholder-val="{{ true }}"><span style="position:absolute;top:5px;right:4px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#c8232a;color:#fff;font:700 11px/18px 'Figtree';text-align:center;border:2px solid #fff">{{ bellCount }}</span></sc-if></button>
 <button onClick="{{ toggleProfile }}" aria-label="Perfil" style="width:38px;height:38px;border-radius:50%;border:0;background:{{ avatarBg }};color:#fff;font:600 14px 'Saira';cursor:pointer;flex:none">{{ initials }}</button>
 </div>
 </sc-if>
@@ -436,6 +440,33 @@ input,textarea,button{font-family:inherit}
 </div>
 </sc-if>
 
+<sc-if value="{{ inboxOpen }}" hint-placeholder-val="{{ false }}">
+<div onClick="{{ closeInbox }}" style="position:absolute;inset:0;background:rgba(20,22,26,.4);z-index:30"></div>
+<div style="position:absolute;left:0;right:0;bottom:0;max-height:82%;background:#fff;border-radius:28px 28px 0 0;padding:10px 16px 30px;z-index:31;display:flex;flex-direction:column;gap:10px">
+<div style="width:40px;height:5px;border-radius:3px;background:#dcdad5;align-self:center;margin-bottom:4px"></div>
+<div style="display:flex;align-items:center;gap:8px;margin:0 4px">
+<h2 style="flex:1;margin:0;font:600 20px 'Saira'">Notificaciones</h2>
+<button onClick="{{ closeInbox }}" aria-label="Cerrar" style="width:38px;height:38px;border:0;border-radius:50%;background:#f4f6fb;cursor:pointer;display:grid;place-items:center"><span style="font-family:'Material Symbols Rounded';font-size:22px;line-height:1">close</span></button>
+</div>
+<button onClick="{{ pushAction }}" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:16px;border:0;background:{{ pushBg }};color:{{ pushFg }};text-align:left;cursor:pointer">
+<span style="font-family:'Material Symbols Rounded';font-size:24px;line-height:1">{{ pushIcon }}</span>
+<div style="flex:1;display:flex;flex-direction:column;gap:2px"><span style="font-weight:700;font-size:14.5px">{{ pushTitle }}</span><span style="font-size:12.5px;opacity:.85">{{ pushSub }}</span></div>
+</button>
+<div style="flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:8px">
+<sc-for list="{{ inboxItems }}" as="n" hint-placeholder-count="3">
+<div style="display:flex;gap:12px;padding:12px;border-radius:16px;border:1.5px solid {{ n.border }};background:{{ n.bg }}">
+<div style="width:38px;height:38px;flex:none;border-radius:12px;background:{{ n.iconBg }};color:#fff;display:grid;place-items:center"><span style="font-family:'Material Symbols Rounded';font-size:21px;line-height:1">{{ n.icon }}</span></div>
+<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+<div style="display:flex;gap:8px;align-items:baseline"><span style="flex:1;font-weight:700;font-size:14.5px;color:#1f2328">{{ n.title }}</span><span style="flex:none;font-size:11.5px;color:#8a8f9c">{{ n.when }}</span></div>
+<span style="font-size:13.5px;line-height:1.4;color:#3c4043">{{ n.body }}</span>
+</div>
+</div>
+</sc-for>
+<sc-if value="{{ inboxEmpty }}" hint-placeholder-val="{{ false }}"><div style="padding:30px 10px;text-align:center;color:#5f6368;font-size:14px">No tienes notificaciones todavía.</div></sc-if>
+</div>
+</div>
+</sc-if>
+
 <sc-if value="{{ pickOpen }}" hint-placeholder-val="{{ false }}">
 <div onClick="{{ closePick }}" style="position:absolute;inset:0;background:rgba(20,22,26,.4);z-index:30"></div>
 <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:28px 28px 0 0;padding:10px 16px 34px;z-index:31;display:flex;flex-direction:column;gap:8px">
@@ -682,6 +713,39 @@ input,textarea,button{font-family:inherit}
 </sc-if>
 </div>
 </sc-for>
+</div>
+</sc-if>
+
+<sc-if value="{{ isAsistencia }}" hint-placeholder-val="{{ false }}">
+<div style="flex:1;overflow:auto;padding:20px 18px 110px;display:flex;flex-direction:column;gap:14px">
+<div>
+<h1 style="margin:0;font:600 26px 'Saira'">Asistencia</h1>
+<p style="margin:2px 0 0;font-size:13.5px;color:#5f6368">Sobre todas las clases del curso · 100 % = asististe a todas</p>
+</div>
+<sc-for list="{{ attCards }}" as="a" hint-placeholder-count="2">
+<div style="flex:none;background:#fff;border:1px solid #e6e4df;border-radius:18px;overflow:hidden">
+<div style="display:flex;align-items:center;gap:12px;padding:14px 16px 10px">
+<span style="width:10px;height:10px;border-radius:50%;background:{{ a.color }};flex:none"></span>
+<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><span style="font:600 17px 'Saira'">{{ a.name }}</span><span style="font-size:12.5px;color:#5f6368">{{ a.sub }}</span></div>
+<span style="font:600 28px 'Saira';color:{{ a.pctColor }}">{{ a.pct }}</span>
+</div>
+<div style="margin:0 16px 12px;height:10px;border-radius:5px;background:#eef0f4;overflow:hidden"><div style="height:100%;width:{{ a.width }};background:{{ a.bar }};border-radius:5px"></div></div>
+<button onClick="{{ a.toggle }}" style="display:flex;width:100%;align-items:center;gap:6px;padding:10px 16px;border:0;border-top:1px solid #efeeea;background:none;cursor:pointer;color:#2e6cc1;font:600 13.5px 'Figtree'">{{ a.toggleLabel }}<span style="font-family:'Material Symbols Rounded';font-size:20px;line-height:1">{{ a.chev }}</span></button>
+<sc-if value="{{ a.open }}" hint-placeholder-val="{{ false }}">
+<div>
+<sc-for list="{{ a.rows }}" as="r" hint-placeholder-count="3">
+<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid #f4f3ef">
+<div style="width:44px;flex:none;display:flex;flex-direction:column;align-items:center;line-height:1.1"><span style="font:600 16px 'Saira'">{{ r.day }}</span><span style="font-size:11px;color:#5f6368">{{ r.mon }}</span></div>
+<span style="flex:1;font-size:14px">{{ r.title }}</span>
+<span style="flex:none;padding:4px 10px;border-radius:12px;background:{{ r.bg }};color:{{ r.fg }};font-size:12px;font-weight:700">{{ r.label }}</span>
+</div>
+</sc-for>
+<sc-if value="{{ a.noRows }}" hint-placeholder-val="{{ false }}"><div style="padding:12px 16px;font-size:13.5px;color:#5f6368;border-top:1px solid #f4f3ef">El profesor todavía no programa clases en este curso.</div></sc-if>
+</div>
+</sc-if>
+</div>
+</sc-for>
+<sc-if value="{{ attEmpty }}" hint-placeholder-val="{{ false }}"><div style="padding:24px;text-align:center;color:#5f6368">No estás inscrito en cursos.</div></sc-if>
 </div>
 </sc-if>
 
@@ -1917,7 +1981,7 @@ class Component extends DCLogic {
     window.addEventListener('resize', this._onResize);
     this.restoreSession();
     // Los datos se actualizan solos: cada minuto y cada vez que se vuelve a abrir la app
-    this._refresh = setInterval(() => { if (document.visibilityState === 'visible') this.refreshData(); }, 60000);
+    this._refresh = setInterval(() => { if (document.visibilityState === 'visible') this.refreshData(); }, 30000);
     this._onVisible = () => { if (document.visibilityState === 'visible') this.refreshData(); };
     document.addEventListener('visibilitychange', this._onVisible);
     this._clock = setInterval(() => this.forceUpdate(), 60000);
@@ -2001,7 +2065,7 @@ class Component extends DCLogic {
 
   toastMsg(msg) { clearTimeout(this._toastT); this.setState({ toast: msg }); this._toastT = setTimeout(() => this.setState({ toast: null }), 2800); }
 
-  closedOverlays() { return { paySheet: null, pickCourse: false, reqSheet: false, rolesOpen: false, editField: null, profileOpen: false, contactOpen: false, addOpen: false, form: null, action: null, confirmDel: null, popup: null }; }
+  closedOverlays() { return { inboxOpen: false, paySheet: null, pickCourse: false, reqSheet: false, rolesOpen: false, editField: null, profileOpen: false, contactOpen: false, addOpen: false, form: null, action: null, confirmDel: null, popup: null }; }
 
   apiBase() { return String(window.ADAPT_API_URL || '').replace(/\/+$/, ''); }
   storedToken() { try { return localStorage.getItem('adapt-token') || ''; } catch (e) { return ''; } }
@@ -2051,7 +2115,7 @@ class Component extends DCLogic {
       COURSES[id] = { id, pk: c.id, name: c.nombre, teacher: c.profesor, teacherEmail: c.profesor_email, color: p[0],
         blocks: b.map(x => ({ day: x.dia, start: x.inicio, end: x.fin, room: x.sala || 'Sala por confirmar' })),
         days: Array.from(new Set(b.map(x => x.dia))), start: first.inicio || '', end: first.fin || '', room: b.length ? (first.sala || 'Sala por confirmar') : 'Sin horario',
-        students: c.alumnos || 0, att: c.asistencia };
+        students: c.alumnos || 0, att: c.asistencia, attDetail: c.asistencia_detalle || null };
       materials[id] = ((d.contenido || {})[c.id] || []).map(m => {
         const base = { id: m.id, pk: m.pk, title: m.titulo, parent: m.carpeta || null, hidden: !m.visible };
         if (m.tipo === 'archivo') { const ext = (m.archivo_nombre || '').split('.').pop().toLowerCase(); return Object.assign(base, { type: 'archivo', fileType: FT[ext] || 'PDF', fileName: m.archivo_nombre || '', size: m.tamano || '', apiFile: m.descarga || null }); }
@@ -2072,9 +2136,10 @@ class Component extends DCLogic {
     this.CLASES = {};
     Object.keys(d.clases || {}).forEach(k => { this.CLASES['c' + k] = d.clases[k]; });
     this.PUSH_KEY = d.push || null;
+    const inbox = d.notificaciones || { sin_leer: 0, lista: [] };
     const surveyDone = {};
     Object.keys(materials).forEach(k => materials[k].forEach(m => { if (m.type === 'encuesta' && m.myVote != null) surveyDone[m.id] = m.myVote; }));
-    return { user: { id: String(u.id), email: u.email, name: u.nombre, fullName: u.nombre_completo, rut: u.rut, since: u.fecha_registro, role: u.rol, roles: u.roles || [u.rol], courses: ids }, materials, grades, surveyDone };
+    return { user: { id: String(u.id), email: u.email, name: u.nombre, fullName: u.nombre_completo, rut: u.rut, since: u.fecha_registro, role: u.rol, roles: u.roles || [u.rol], courses: ids }, materials, grades, surveyDone, inbox };
   }
 
   async loadData(extra) {
@@ -2095,7 +2160,7 @@ class Component extends DCLogic {
       this.setState(x => {
         const materials = {};
         Object.keys(st.materials).forEach(k => { materials[k] = st.materials[k].map(m => { const old = (x.materials[k] || []).find(o => o.id === m.id); return old && old.fileUrl ? Object.assign(m, { fileUrl: old.fileUrl }) : m; }); });
-        return { materials, grades: st.grades, user: st.user, surveyDone: Object.assign({}, x.surveyDone, st.surveyDone) };
+        return { materials, grades: st.grades, user: st.user, inbox: st.inbox, surveyDone: Object.assign({}, x.surveyDone, st.surveyDone) };
       });
     } catch (e) {} finally { this._refreshing = false; }
   }
@@ -2170,11 +2235,45 @@ class Component extends DCLogic {
     }
   }
 
-  // Campanita: activa las notificaciones de este teléfono y manda una de prueba; si algo falta, dice qué
+  // Campanita: abre la bandeja. Al abrirla, los avisos quedan leídos y el punto rojo desaparece
+  async openInbox() {
+    const inbox = this.state.inbox || { sin_leer: 0, lista: [] };
+    // Los que estaban sin leer al abrir se siguen destacando mientras la bandeja está abierta
+    this.setState({ inboxOpen: true, inboxNew: inbox.lista.filter(n => !n.leida).map(n => n.id) });
+    if (inbox.sin_leer > 0) {
+      try { this.setState({ inbox: await this.api('notificaciones/leidas/', { body: {} }) }); } catch (e) {}
+    }
+  }
+
+  inboxVals() {
+    const s = this.state, inbox = s.inbox || { lista: [] }, nuevos = s.inboxNew || [];
+    const ICON = [['Asistencia', 'how_to_reg', '#1e9e5a'], ['nota', 'grade', '#c9a800'], ['foro', 'forum', '#f65b47'], ['comentó', 'forum', '#f65b47'],
+      ['encuesta', 'ballot', '#c9a800'], ['actividad', 'assignment', '#c8232a'], ['entrega', 'alarm', '#c8232a'], ['clase', 'schedule', '#2e6cc1'], ['material', 'upload_file', '#2e6cc1'], ['prueba', 'notifications_active', '#2e6cc1']];
+    const items = inbox.lista.map(n => {
+      const ic = ICON.find(x => n.titulo.toLowerCase().includes(x[0].toLowerCase())) || ['', 'notifications', '#63666e'], nuevo = nuevos.includes(n.id);
+      return { title: n.titulo, body: n.cuerpo, when: this.ago(n.fecha), icon: ic[1], iconBg: ic[2], bg: nuevo ? 'rgba(246,91,71,.07)' : '#fff', border: nuevo ? '#f9cdc4' : '#eef0f4' };
+    });
+    const st = this.pushState();
+    return {
+      inboxOpen: !!s.user && s.inboxOpen, inboxItems: items, inboxEmpty: items.length === 0,
+      closeInbox: () => this.setState({ inboxOpen: false, inboxNew: [] }),
+      pushAction: () => this.bellTap(), pushTitle: st[0], pushSub: st[1], pushIcon: st[2],
+      pushBg: st[3] ? 'linear-gradient(90deg,#2e6cc1 0%,#c8232a 45%,#f65b47 78%,#e9cf22 100%)' : '#f4f6fb', pushFg: st[3] ? '#fff' : '#1f2328'
+    };
+  }
+
+  // Estado de las notificaciones en este teléfono: [título, explicación, ícono, destacado]
+  pushState() {
+    if (!this.PUSH_KEY) return ['Avisos al teléfono desactivados', 'Por ahora los avisos se ven solo aquí, en la campanita.', 'notifications_off', false];
+    if (this.state.pushOn) return ['Avisos al teléfono activados', 'Toca aquí para enviarte una notificación de prueba.', 'notifications_active', false];
+    return ['Activar avisos en este teléfono', 'Te llegarán aunque la app esté cerrada.', 'notification_add', true];
+  }
+
+  // Activa las notificaciones de este teléfono y manda una de prueba; si algo falta, dice qué
   async bellTap() {
     const iphone = /iPhone|iPad|iPod/.test(navigator.userAgent);
     const instalada = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
-    if (!this.PUSH_KEY) return this.notify('Notificaciones no activadas', 'El servidor todavía no tiene configuradas las notificaciones. Pídele al administrador que agregue las claves VAPID en Railway.');
+    if (!this.PUSH_KEY) return this.toastMsg('El servidor todavía no tiene activados los avisos al teléfono');
     if (iphone && !instalada) return this.notify('Instala la app primero', 'En iPhone, las notificaciones solo funcionan con la app agregada a la pantalla de inicio: en Safari toca Compartir → "Agregar a pantalla de inicio" y ábrela desde ese ícono.');
     if (!this.pushSupported()) return this.notify('Notificaciones no disponibles', 'Este navegador no admite notificaciones. En Android usa Chrome; en iPhone, Safari con la app en la pantalla de inicio.');
     if (Notification.permission === 'denied') return this.notify('Notificaciones bloqueadas', 'Las bloqueaste para esta app. Actívalas en Ajustes del teléfono → Notificaciones → Adapt Academy (o en los permisos del sitio en Chrome).');
@@ -2415,6 +2514,25 @@ class Component extends DCLogic {
     return { prov: sw ? sum / sw : null, n, all: n === evals.length };
   }
   gradeColor(v) { return v == null ? '#9aa0a6' : v < 4 ? '#c8232a' : '#1f2328'; }
+
+  attendanceCards() {
+    const s = this.state, open = s.attOpen || {};
+    const EST = { presente: ['Presente', '#e1f5e9', '#14703f'], ausente: ['Ausente', '#fbe3e4', '#a01c22'], sin_registro: ['Sin registro', '#f1f2f5', '#5f6368'], proxima: ['Próxima', '#e8f0fb', '#2e6cc1'] };
+    return this.userCourses().map(id => {
+      const c = this.COURSES[id], d = c.attDetail || { total: 0, presentes: 0, ausentes: 0, porcentaje: null, clases: [] }, p = d.porcentaje;
+      const color = p == null ? '#9aa0a6' : p >= 75 ? '#1e9e5a' : p >= 50 ? '#c9a800' : '#c8232a';
+      return {
+        name: c.name, color: c.color, pct: p == null ? '—' : p + '%', pctColor: color, width: (p || 0) + '%',
+        bar: p == null ? '#c3c8d2' : 'linear-gradient(90deg,' + color + ',' + color + 'cc)',
+        sub: d.total ? 'Asististe a ' + d.presentes + ' de ' + d.total + (d.total === 1 ? ' clase' : ' clases') + (d.ausentes ? ' · ' + d.ausentes + (d.ausentes === 1 ? ' ausencia' : ' ausencias') : '') : 'Aún no hay clases programadas',
+        open: !!open[id], chev: open[id] ? 'expand_less' : 'expand_more', toggleLabel: open[id] ? 'Ocultar clases' : 'Ver clases',
+        toggle: () => this.setState(x => ({ attOpen: Object.assign({}, x.attOpen, { [id]: !(x.attOpen || {})[id] }) })),
+        noRows: d.clases.length === 0,
+        rows: d.clases.map(k => { const e = EST[k.estado] || EST.sin_registro, f = new Date(k.fecha + 'T12:00');
+          return { day: f.getDate(), mon: this.MONTHS[f.getMonth()].slice(0, 3), title: k.titulo + ' · ' + k.inicio, label: e[0], bg: e[1], fg: e[2] }; })
+      };
+    });
+  }
 
   studentGradeCards() {
     const s = this.state;
@@ -2658,7 +2776,7 @@ class Component extends DCLogic {
       contactClick: () => used ? this.toastMsg('Ya enviaste una solicitud hoy') : this.setState({ contactOpen: true, contactError: '' }),
       services: [
         ['Mail', 'mail', '#2e6cc1', '#5b93dc', 'gmail'],
-        ['Plataforma web', 'language', '#c8232a', '#e2475f', 'web'],
+        ['Asistencia', 'how_to_reg', '#1e9e5a', '#5fd08e', 'asistencia'],
         ['Calificaciones', 'grade', '#c9a800', '#f0d63a', 'grades'],
         ['Ayuda', 'support_agent', '#2e6cc1', '#f65b47', 'ayuda']
       ].map(x => ({ label: x[0], icon: x[1], fg: '#fff', tint: 'linear-gradient(135deg,' + x[2] + ',' + x[3] + ')', badge: '',
@@ -2831,7 +2949,7 @@ class Component extends DCLogic {
         const ok = !!s.pending && (s.pending.roles || [s.pending.rol]).includes(o[0]);
         return { label: o[1], icon: ok ? o[2] : 'lock', roleName: o[3], disabled: !ok, bg: ok ? o[4] : '#e3e5eb', fg: ok ? '#fff' : '#8a8f9c', shadow: ok ? '0 1px 2px rgba(0,0,0,.25)' : 'none', cursor: ok ? 'pointer' : 'not-allowed', click: () => { if (ok) this.enter(s.pending, o[0]); } };
       }),
-      isHome: app && scr === 'home', isStudent: app && !prof, showStudentNav: app && !this.isAlumni() && (prof ? ['home', 'courses', 'course', 'schedule', 'profile'] : ['home', 'courses', 'course', 'schedule', 'grades', 'profile']).includes(scr), showTabsHeader: false, isStudentHome: app && !prof && !this.isAlumni() && scr === 'home', isAlumniHome: app && this.isAlumni() && scr === 'home',
+      isHome: app && scr === 'home', isStudent: app && !prof, showStudentNav: app && !this.isAlumni() && (prof ? ['home', 'courses', 'course', 'schedule', 'profile'] : ['home', 'courses', 'course', 'schedule', 'grades', 'asistencia', 'profile']).includes(scr), showTabsHeader: false, isStudentHome: app && !prof && !this.isAlumni() && scr === 'home', isAlumniHome: app && this.isAlumni() && scr === 'home',
       ...(app && this.isAlumni() && scr === 'home' ? this.alumniVals() : { alumni: {}, alumniCerts: [], alumniActions: [] }),
       isCoursesList: app && scr === 'courses', listTitle: 'Mis cursos', isTeacherHome: app && prof && scr === 'home',
       ...(app && prof && scr === 'home' ? this.teacherHomeVals() : { tWeek: [], tDayItems: [], tActions: [], tAttn: [], tCourses: [] }),
@@ -2839,13 +2957,14 @@ class Component extends DCLogic {
       pickCourses: prof ? this.userCourses().map(id => { const c = this.COURSES[id], p = this.PAL[id]; return { name: c.name, abbr: this.initialsOf(c.name), grad: 'linear-gradient(135deg,' + p.a + ',' + p.b + ')', sub: this.list(id).length + ' materiales publicados', click: () => this.setState({ pickCourse: false, courseId: id, screen: 'course', addOpen: true }) }; }) : [],
       ...(app && !prof && scr === 'home' ? this.studentHomeVals() : { pending: [], avgRows: [], nextClass: {} }),
       goCourses: () => this.setState({ screen: 'courses' }), goSchedule: () => this.setState({ screen: 'schedule' }), goGrades: () => this.setState({ screen: 'grades' }),
-      bell: () => this.bellTap(),
+      bell: () => this.openInbox(),
       popTop: '116px', popBottom: 'auto', popMax: '690px',
       bottomNav: [['Inicio', 'home', 'home', '#2e6cc1', '#8db8f2'], ['Cursos', 'courses', 'menu_book', '#c8232a', '#ff8a8f'], ['Horario', 'schedule', 'calendar_month', '#e8503c', '#ffa48f'], ['Notas', 'grades', 'grade', '#a88f00', '#f2dc4a']].map(b => {
         const on = b[1] === 'courses' ? (scr === 'courses' || inCourse) : scr === b[1];
         return { label: b[0], icon: b[2], on, flex: on ? '1.8 1 0' : '1 1 0', fill: on ? 1 : 0, bg: on ? 'linear-gradient(135deg,#ff8a6e 0%,#f65b47 100%)' : 'transparent', color: on ? '#fff' : '#63666e', grad: on ? 'linear-gradient(135deg,#2e6cc1 0%,#c8232a 45%,#f65b47 75%,#e9cf22 100%)' : 'linear-gradient(135deg,#8db8f2 0%,#ff8a8f 45%,#ffa48f 72%,#f2dc4a 100%)', click: () => this.setState({ screen: b[1], profileOpen: false }) };
       }), isCourse: app && scr === 'course', isMaterial: app && scr === 'material', isQuiz: app && scr === 'quiz', isForum: app && scr === 'forum',
-      isSchedule: app && scr === 'schedule', isGradesStudent: app && scr === 'grades' && !prof, isGradesProf: app && scr === 'grades' && prof, isProf: prof,
+      isSchedule: app && scr === 'schedule', isGradesStudent: app && scr === 'grades' && !prof, isAsistencia: app && scr === 'asistencia' && !prof,
+      ...(app && !prof && scr === 'asistencia' ? (() => { const cards = this.attendanceCards(); return { attCards: cards, attEmpty: cards.length === 0 }; })() : { attCards: [] }), isGradesProf: app && scr === 'grades' && prof, isProf: prof,
       ...(app && scr === 'profile' ? this.profileVals() : { profStats: [], profTiles: [], dataTabs: [], dataRows: [], roleOptions: [] }),
       isProfileScreen: app && scr === 'profile',
       ...(app && !prof ? this.studentExtraVals() : { student: {} }),
@@ -2978,6 +3097,8 @@ class Component extends DCLogic {
         this.toastMsg('Material eliminado');
       },
 
+      ...(app ? this.inboxVals() : { inboxOpen: false, inboxItems: [] }),
+      bellCount: app && s.inbox && s.inbox.sin_leer ? (s.inbox.sin_leer > 9 ? '9+' : String(s.inbox.sin_leer)) : '',
       toast: s.toast,
       notifMounted: !!s.notif, notifY: s.notifShown ? 'translateY(0px)' : 'translateY(-160%)',
       notifTitle: s.notif ? s.notif.title : '', notifBody: s.notif ? s.notif.body : '', hideNotif: () => this.setState({ notifShown: false }),

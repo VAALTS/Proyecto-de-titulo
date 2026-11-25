@@ -25,7 +25,7 @@ from cursos.views_profesor import puede_descargar
 from evaluaciones.calculos import calificaciones_del_alumno, resumen_del_curso
 from evaluaciones.forms import NotaField
 from evaluaciones.models import Actividad, Calificacion, Entrega
-from notificaciones.models import Dispositivo, SolicitudContacto
+from notificaciones.models import Dispositivo, Notificacion, SolicitudContacto
 from notificaciones.push import enviar as enviar_push
 from notificaciones.push import push_activo
 from usuarios.cuentas import asignar_clave_temporal
@@ -180,11 +180,26 @@ def bloques_por_curso(cursos):
     return bloques
 
 
-def porcentaje_asistencia(inscripcion):
-    total = inscripcion.asistencias.count()
-    if not total:
-        return None
-    return round(inscripcion.asistencias.filter(presente=True).count() * 100 / total)
+def asistencia_del_alumno(curso, inscripcion):
+    """Asistencia del alumno sobre todas las clases del curso: llega a 100 % cuando asistió a todas."""
+    clases = list(Clase.objects.filter(modulo__curso=curso).order_by('fecha', 'hora_inicio'))
+    registros = {a.clase_id: a.presente for a in inscripcion.asistencias.all()}
+    hoy = timezone.localdate()
+    detalle = []
+    for clase in clases:
+        if clase.pk in registros:
+            estado = 'presente' if registros[clase.pk] else 'ausente'
+        else:
+            estado = 'proxima' if clase.fecha > hoy else 'sin_registro'
+        detalle.append({'titulo': clase.titulo, 'fecha': clase.fecha.isoformat(), 'inicio': hhmm(clase.hora_inicio),
+                        'estado': estado})
+    presentes = sum(1 for d in detalle if d['estado'] == 'presente')
+    return {
+        'total': len(clases), 'presentes': presentes,
+        'ausentes': sum(1 for d in detalle if d['estado'] == 'ausente'),
+        'porcentaje': round(presentes * 100 / len(clases)) if clases else None,
+        'clases': detalle,
+    }
 
 
 # ---------- inicio de sesión ----------
@@ -239,6 +254,7 @@ def datos(request):
     es_profesor = usuario.rol == Rol.PROFESOR
     salida = {'usuario': datos_usuario(usuario), 'web': request.build_absolute_uri('/'),
               'push': settings.VAPID_PUBLIC_KEY or None,
+              'notificaciones': bandeja(usuario),
               'cursos': [], 'contenido': {}, 'notas': {}, 'clases': {}}
 
     if es_profesor:
@@ -272,8 +288,9 @@ def datos(request):
     bloques = bloques_por_curso(cursos)
     for curso in cursos:
         inscripcion = inscripciones[curso.pk]
-        salida['cursos'].append(datos_curso(curso, bloques.get(curso.pk, []),
-                                            asistencia=porcentaje_asistencia(inscripcion)))
+        asistencia = asistencia_del_alumno(curso, inscripcion)
+        salida['cursos'].append(dict(datos_curso(curso, bloques.get(curso.pk, []), asistencia=asistencia['porcentaje']),
+                                     asistencia_detalle=asistencia))
         salida['contenido'][curso.pk] = (materiales_del_curso(request, curso, False)
                                          + actividades_del_curso(request, curso, inscripcion, False)
                                          + foros_del_curso(curso, usuario)
@@ -596,3 +613,30 @@ def probar_push(request):
     if not entregadas:
         return error('No se pudo entregar la notificación. Vuelve a activar las notificaciones.', 502)
     return {'ok': True, 'entregadas': entregadas}
+
+
+# ---------- bandeja de notificaciones (la campanita) ----------
+
+def bandeja(usuario):
+    avisos = list(usuario.notificaciones.all()[:30])
+    return {
+        'sin_leer': usuario.notificaciones.filter(leida=False).count(),
+        'lista': [{'id': n.pk, 'titulo': n.titulo, 'cuerpo': n.cuerpo, 'leida': n.leida,
+                   'fecha': timezone.localtime(n.fecha).isoformat()} for n in avisos],
+    }
+
+
+@endpoint(['GET'], roles=[Rol.ALUMNO, Rol.PROFESOR])
+def notificaciones(request):
+    return bandeja(request.usuario_api)
+
+
+@endpoint(['POST'], roles=[Rol.ALUMNO, Rol.PROFESOR])
+def notificaciones_leidas(request):
+    """Marca como leídas todas las notificaciones (o solo las indicadas en "ids")."""
+    pendientes = request.usuario_api.notificaciones.filter(leida=False)
+    ids = leer_json(request).get('ids')
+    if isinstance(ids, list):
+        pendientes = pendientes.filter(pk__in=[i for i in ids if isinstance(i, int)])
+    pendientes.update(leida=True)
+    return bandeja(request.usuario_api)

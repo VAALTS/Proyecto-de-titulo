@@ -14,9 +14,9 @@ from django.urls import reverse
 from django.utils import timezone
 
 from cursos.forms import CursoForm, InscripcionForm
-from cursos.models import BloqueHorario, Encuesta, Material, MensajeForo, TemaForo, VotoEncuesta
+from cursos.models import Asistencia, BloqueHorario, Encuesta, Material, MensajeForo, TemaForo, VotoEncuesta
 from evaluaciones.models import Actividad, Calificacion
-from notificaciones.models import Dispositivo, RecordatorioEnviado
+from notificaciones.models import Dispositivo, Notificacion, RecordatorioEnviado
 from usuarios.forms import CuentaForm
 from usuarios.models import Rol, Usuario
 
@@ -212,9 +212,9 @@ class NotificacionesTests(ApiTestCase):
         cuerpos = [json.loads(llamada.kwargs['data']) for llamada in webpush.call_args_list]
         self.assertEqual(cuerpos[0]['title'], 'Faltan 3 horas para la entrega')
         self.assertIn('«Informe»', cuerpos[0]['body'])
-        esperadas = 2 if hay_clase else 1
-        self.assertEqual(len(cuerpos), esperadas)
-        self.assertEqual(RecordatorioEnviado.objects.count(), esperadas)
+        # Push: solo el alumno tiene teléfono registrado. Bandeja: también el profesor recibe el de la clase
+        self.assertEqual(len(cuerpos), 2 if hay_clase else 1)
+        self.assertEqual(RecordatorioEnviado.objects.count(), 3 if hay_clase else 1)
 
 
 class NotificacionDePruebaTests(ApiTestCase):
@@ -233,3 +233,60 @@ class NotificacionDePruebaTests(ApiTestCase):
         respuesta = self.post('api_probar_push', {}, token)
         self.assertEqual(respuesta.json()['entregadas'], 1)
         self.assertEqual(json.loads(webpush.call_args.kwargs['data'])['title'], 'Notificación de prueba')
+
+
+class BandejaTests(ApiTestCase):
+    """La campanita: los avisos quedan guardados aunque el teléfono no tenga push, y se marcan como leídos."""
+
+    def test_asistencia_avisa_al_alumno_y_la_bandeja_se_lee(self):
+        asistencia = Asistencia.objects.create(clase=self.clase, inscripcion=self.inscripcion,
+                                               registrada_por=self.profesor, presente=True)
+        token = self.token(self.alumno)
+        bandeja = self.get('api_datos', token).json()['notificaciones']
+        self.assertEqual(bandeja['sin_leer'], 1)
+        self.assertEqual(bandeja['lista'][0]['titulo'], 'Asistencia: presente')
+        self.assertIn('«Clase 1»', bandeja['lista'][0]['cuerpo'])
+        # Volver a guardar lo mismo no avisa de nuevo; corregir a ausente sí
+        asistencia.save()
+        asistencia.presente = False
+        asistencia.save()
+        self.assertEqual(Notificacion.objects.filter(usuario=self.alumno).count(), 2)
+        respuesta = self.post('api_notificaciones_leidas', {}, token)
+        self.assertEqual(respuesta.json()['sin_leer'], 0)
+        self.assertFalse(Notificacion.objects.filter(leida=False).exists())
+
+    def test_cada_uno_ve_solo_sus_avisos(self):
+        Notificacion.objects.create(usuario=self.otro, titulo='Privado', cuerpo='x')
+        bandeja = self.get('api_notificaciones', self.token(self.alumno)).json()
+        self.assertEqual(bandeja['lista'], [])
+        self.post('api_notificaciones_leidas', {}, self.token(self.alumno))
+        self.assertFalse(Notificacion.objects.get(titulo='Privado').leida)
+
+    def test_recordatorios_quedan_en_la_bandeja_aunque_no_haya_telefono(self):
+        Actividad.objects.create(clase=self.clase, titulo='Informe', ponderacion=Decimal('30'),
+                                 fecha_limite=timezone.now() + timedelta(hours=2))
+        call_command('enviar_recordatorios', stdout=mock.Mock())
+        self.assertTrue(Notificacion.objects.filter(usuario=self.alumno, titulo='Faltan 3 horas para la entrega').exists())
+
+
+class AsistenciaEnLaAppTests(ApiTestCase):
+    """El porcentaje cuenta todas las clases del curso: llega a 100 % cuando el alumno fue a todas."""
+
+    def test_porcentaje_sobre_todas_las_clases_del_curso(self):
+        from cursos.models import Clase
+        modulo = self.clase.modulo
+        hoy = timezone.localdate()
+        segunda = Clase.objects.create(modulo=modulo, titulo='Clase 2', fecha=hoy, hora_inicio=time(11), hora_fin=time(12))
+        Clase.objects.create(modulo=modulo, titulo='Clase 3', fecha=hoy + timedelta(days=7), hora_inicio=time(9),
+                             hora_fin=time(10))
+        Clase.objects.create(modulo=modulo, titulo='Clase 4', fecha=hoy + timedelta(days=14), hora_inicio=time(9),
+                             hora_fin=time(10))
+        Asistencia.objects.create(clase=self.clase, inscripcion=self.inscripcion, registrada_por=self.profesor,
+                                  presente=True)
+        Asistencia.objects.create(clase=segunda, inscripcion=self.inscripcion, registrada_por=self.profesor,
+                                  presente=False)
+        curso = self.get('api_datos', self.token(self.alumno)).json()['cursos'][0]
+        detalle = curso['asistencia_detalle']
+        self.assertEqual(curso['asistencia'], 25)
+        self.assertEqual((detalle['total'], detalle['presentes'], detalle['ausentes']), (4, 1, 1))
+        self.assertEqual([c['estado'] for c in detalle['clases']], ['presente', 'ausente', 'proxima', 'proxima'])

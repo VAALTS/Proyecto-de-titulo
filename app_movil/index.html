@@ -440,6 +440,18 @@ input,textarea,button{font-family:inherit}
 </div>
 </sc-if>
 
+<sc-if value="{{ pushAskOpen }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;inset:0;background:rgba(20,22,26,.45);z-index:60;display:grid;place-items:center;padding:30px">
+<div style="width:100%;max-width:320px;background:#fff;border-radius:22px;padding:24px 22px 18px;display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center">
+<div style="width:58px;height:58px;border-radius:50%;background:linear-gradient(90deg,#2e6cc1 0%,#c8232a 45%,#f65b47 78%,#e9cf22 100%);color:#fff;display:grid;place-items:center"><span style="font-family:'Material Symbols Rounded';font-size:30px;line-height:1">notifications_active</span></div>
+<span style="font:600 19px 'Saira'">{{ pushAskTitle }}</span>
+<span style="font-size:14.5px;line-height:1.45;color:#3c4043">{{ pushAskBody }}</span>
+<button onClick="{{ pushAskYes }}" style="width:100%;height:50px;margin-top:6px;border:0;border-radius:14px;background:linear-gradient(90deg,#2e6cc1 0%,#c8232a 45%,#f65b47 78%,#e9cf22 100%);text-shadow:0 1px 2px rgba(0,0,0,.25);color:#fff;font:600 16px 'Saira';cursor:pointer" style-active="transform:scale(.98)">{{ pushAskYesLabel }}</button>
+<button onClick="{{ pushAskLater }}" style="width:100%;height:42px;border:0;border-radius:12px;background:none;color:#5f6368;font:600 14.5px 'Figtree';cursor:pointer">Ahora no</button>
+</div>
+</div>
+</sc-if>
+
 <sc-if value="{{ inboxOpen }}" hint-placeholder-val="{{ false }}">
 <div onClick="{{ closeInbox }}" style="position:absolute;inset:0;background:rgba(20,22,26,.4);z-index:30"></div>
 <div style="position:absolute;left:0;right:0;bottom:0;max-height:82%;background:#fff;border-radius:28px 28px 0 0;padding:10px 16px 30px;z-index:31;display:flex;flex-direction:column;gap:10px">
@@ -2148,7 +2160,21 @@ class Component extends DCLogic {
       pending: null, screen: 'home', attempts: 0, password: '', loginMsg: '', loading: false, popup: null,
       courseId: null, materialId: null, tgCourse: st.user.courses[0] || null, tgEval: null, tgDraft: {}, tgError: '', week: 0, schedFilter: 'all'
     }, extra || {}));
-    this.enablePush(false);
+    // Se pregunta un momento después de entrar, cuando ya se ve el inicio
+    this.enablePush(false).then(ok => { if (!ok) setTimeout(() => this.maybeAskPush(), 1200); });
+  }
+
+  // Decide si mostrar la ventana que pide activar las notificaciones
+  maybeAskPush() {
+    if (!this.PUSH_KEY || !this.state.user) return;
+    let later = 0;
+    try { later = Number(localStorage.getItem('adapt-push-later') || 0); } catch (e) {}
+    if (Date.now() - later < 24 * 60 * 60 * 1000) return;  // Si dijo "Ahora no", se vuelve a preguntar al día siguiente
+    const iphone = /iPhone|iPad|iPod/.test(navigator.userAgent);
+    const instalada = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+    if (iphone && !instalada) return this.setState({ pushAsk: 'instalar' });
+    if (!this.pushSupported() || Notification.permission !== 'default') return;
+    this.setState({ pushAsk: 'permiso' });
   }
 
   // Vuelve a pedir los datos sin cambiar de pantalla, para ver lo nuevo que se publicó en la web o en la app
@@ -3098,6 +3124,14 @@ class Component extends DCLogic {
       },
 
       ...(app ? this.inboxVals() : { inboxOpen: false, inboxItems: [] }),
+      pushAskOpen: app && !!s.pushAsk,
+      pushAskTitle: s.pushAsk === 'instalar' ? 'Instala la app para recibir avisos' : '¿Activamos las notificaciones?',
+      pushAskBody: s.pushAsk === 'instalar'
+        ? 'En iPhone, los avisos solo llegan con la app en la pantalla de inicio: en Safari toca Compartir → "Agregar a pantalla de inicio" y ábrela desde ese ícono.'
+        : 'Te avisaremos de tu asistencia, notas nuevas, material, foros y recordatorios de clases y entregas, aunque la app esté cerrada.',
+      pushAskYesLabel: s.pushAsk === 'instalar' ? 'Entendido' : 'Permitir notificaciones',
+      pushAskYes: () => { const tipo = s.pushAsk; this.setState({ pushAsk: null }); if (tipo === 'permiso') this.enablePush(true); else { try { localStorage.setItem('adapt-push-later', String(Date.now())); } catch (e) {} } },
+      pushAskLater: () => { try { localStorage.setItem('adapt-push-later', String(Date.now())); } catch (e) {} this.setState({ pushAsk: null }); },
       bellCount: app && s.inbox && s.inbox.sin_leer ? (s.inbox.sin_leer > 9 ? '9+' : String(s.inbox.sin_leer)) : '',
       toast: s.toast,
       notifMounted: !!s.notif, notifY: s.notifShown ? 'translateY(0px)' : 'translateY(-160%)',

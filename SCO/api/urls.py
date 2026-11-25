@@ -15,6 +15,7 @@ urlpatterns = [
     path('contacto/', views.contacto, name='api_contacto'),
     path('rol/', views.cambiar_rol, name='api_cambiar_rol'),
     path('dispositivo/', views.dispositivo, name='api_dispositivo'),
+    path('dispositivo/prueba/', views.probar_push, name='api_probar_push'),
     path('cursos/<int:pk>/material/', views.crear_material, name='api_crear_material'),
     path('cursos/<int:pk>/foros/', views.crear_foro, name='api_crear_foro'),
     path('cursos/<int:pk>/encuestas/', views.crear_encuesta, name='api_crear_encuesta'),

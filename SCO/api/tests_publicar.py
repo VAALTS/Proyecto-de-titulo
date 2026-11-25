@@ -215,3 +215,21 @@ class NotificacionesTests(ApiTestCase):
         esperadas = 2 if hay_clase else 1
         self.assertEqual(len(cuerpos), esperadas)
         self.assertEqual(RecordatorioEnviado.objects.count(), esperadas)
+
+
+class NotificacionDePruebaTests(ApiTestCase):
+
+    def test_sin_claves_avisa_que_falta_configurar(self):
+        respuesta = self.post('api_probar_push', {}, self.token(self.alumno))
+        self.assertEqual(respuesta.status_code, 503)
+        self.assertIn('VAPID', respuesta.json()['error'])
+
+    @override_settings(**PUSH)
+    @mock.patch('notificaciones.push.webpush')
+    def test_envia_la_prueba_al_telefono_registrado(self, webpush):
+        token = self.token(self.alumno)
+        self.assertEqual(self.post('api_probar_push', {}, token).status_code, 400)
+        Dispositivo.objects.create(usuario=self.alumno, endpoint='https://push.ejemplo.cl/9', p256dh='p', auth='a')
+        respuesta = self.post('api_probar_push', {}, token)
+        self.assertEqual(respuesta.json()['entregadas'], 1)
+        self.assertEqual(json.loads(webpush.call_args.kwargs['data'])['title'], 'Notificación de prueba')

@@ -26,6 +26,8 @@ from evaluaciones.calculos import calificaciones_del_alumno, resumen_del_curso
 from evaluaciones.forms import NotaField
 from evaluaciones.models import Actividad, Calificacion, Entrega
 from notificaciones.models import Dispositivo, SolicitudContacto
+from notificaciones.push import enviar as enviar_push
+from notificaciones.push import push_activo
 from usuarios.cuentas import asignar_clave_temporal
 from usuarios.forms import LoginForm
 from usuarios.models import Rol, Usuario
@@ -580,3 +582,17 @@ def votar_encuesta(request, pk):
     VotoEncuesta.objects.update_or_create(encuesta=encuesta, alumno=request.usuario_api,
                                           defaults={'opcion': opcion})
     return {'ok': True}
+
+
+@endpoint(['POST'], roles=[Rol.ALUMNO, Rol.PROFESOR])
+def probar_push(request):
+    """Manda una notificación de prueba a los teléfonos de quien la pide, para revisar que todo funcione."""
+    if not push_activo():
+        return error('El servidor todavía no tiene activadas las notificaciones (faltan las variables VAPID).', 503)
+    if not Dispositivo.objects.filter(usuario=request.usuario_api).exists():
+        return error('Este teléfono todavía no está registrado para recibir notificaciones.', 400)
+    entregadas = enviar_push([request.usuario_api.pk], 'Notificación de prueba',
+                             '¡Listo! Las notificaciones de Adapt Academy llegan a este teléfono.', etiqueta='prueba')
+    if not entregadas:
+        return error('No se pudo entregar la notificación. Vuelve a activar las notificaciones.', 502)
+    return {'ok': True, 'entregadas': entregadas}

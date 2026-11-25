@@ -2170,6 +2170,20 @@ class Component extends DCLogic {
     }
   }
 
+  // Campanita: activa las notificaciones de este teléfono y manda una de prueba; si algo falta, dice qué
+  async bellTap() {
+    const iphone = /iPhone|iPad|iPod/.test(navigator.userAgent);
+    const instalada = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+    if (!this.PUSH_KEY) return this.notify('Notificaciones no activadas', 'El servidor todavía no tiene configuradas las notificaciones. Pídele al administrador que agregue las claves VAPID en Railway.');
+    if (iphone && !instalada) return this.notify('Instala la app primero', 'En iPhone, las notificaciones solo funcionan con la app agregada a la pantalla de inicio: en Safari toca Compartir → "Agregar a pantalla de inicio" y ábrela desde ese ícono.');
+    if (!this.pushSupported()) return this.notify('Notificaciones no disponibles', 'Este navegador no admite notificaciones. En Android usa Chrome; en iPhone, Safari con la app en la pantalla de inicio.');
+    if (Notification.permission === 'denied') return this.notify('Notificaciones bloqueadas', 'Las bloqueaste para esta app. Actívalas en Ajustes del teléfono → Notificaciones → Adapt Academy (o en los permisos del sitio en Chrome).');
+    const ok = this.state.pushOn || await this.enablePush(true);
+    if (!ok) return;
+    try { await this.api('dispositivo/prueba/', { body: {} }); this.toastMsg('Te enviamos una notificación de prueba'); }
+    catch (e) { this.toastMsg(e.message); }
+  }
+
   // Al cerrar sesión, este teléfono deja de recibir los avisos de esa cuenta
   async disablePush() {
     try {
@@ -2825,7 +2839,7 @@ class Component extends DCLogic {
       pickCourses: prof ? this.userCourses().map(id => { const c = this.COURSES[id], p = this.PAL[id]; return { name: c.name, abbr: this.initialsOf(c.name), grad: 'linear-gradient(135deg,' + p.a + ',' + p.b + ')', sub: this.list(id).length + ' materiales publicados', click: () => this.setState({ pickCourse: false, courseId: id, screen: 'course', addOpen: true }) }; }) : [],
       ...(app && !prof && scr === 'home' ? this.studentHomeVals() : { pending: [], avgRows: [], nextClass: {} }),
       goCourses: () => this.setState({ screen: 'courses' }), goSchedule: () => this.setState({ screen: 'schedule' }), goGrades: () => this.setState({ screen: 'grades' }),
-      bell: () => this.pushSupported() && !s.pushOn ? this.enablePush(true) : prof ? this.remindTeacher() : this.isAlumni() ? this.notify('Comunidad de egresados', 'Tus certificados de título y egreso están disponibles para descarga en cualquier momento.') : this.remindActivity('1 día'),
+      bell: () => this.bellTap(),
       popTop: '116px', popBottom: 'auto', popMax: '690px',
       bottomNav: [['Inicio', 'home', 'home', '#2e6cc1', '#8db8f2'], ['Cursos', 'courses', 'menu_book', '#c8232a', '#ff8a8f'], ['Horario', 'schedule', 'calendar_month', '#e8503c', '#ffa48f'], ['Notas', 'grades', 'grade', '#a88f00', '#f2dc4a']].map(b => {
         const on = b[1] === 'courses' ? (scr === 'courses' || inCourse) : scr === b[1];

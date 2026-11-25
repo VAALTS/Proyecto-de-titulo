@@ -1,6 +1,6 @@
 // Service worker de la app: guarda los archivos de la app (no los datos) y muestra las notificaciones push.
 // Las respuestas de la API nunca se guardan, así los datos de un usuario no quedan en el teléfono.
-const CACHE = 'adapt-academy-v3';
+const CACHE = 'adapt-academy-v4';
 const ARCHIVOS = ['./', './index.html', './config.js', './support.js', './image-slot.js', './manifest.webmanifest', './icon-192.png', './icon-512.png', './assets/adapt-logo.png', './assets/adapt-mark.png'];
 
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(ARCHIVOS))); self.skipWaiting(); });
@@ -16,13 +16,17 @@ self.addEventListener('fetch', e => {
 self.addEventListener('push', e => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch (err) { d = { body: e.data ? e.data.text() : '' }; }
-  e.waitUntil(self.registration.showNotification(d.title || 'Adapt Academy', {
-    body: d.body || '',
-    icon: 'icon-192.png',
-    badge: 'icon-192.png',
-    tag: d.tag || undefined,
-    data: { url: d.url || './' }
-  }));
+  e.waitUntil(Promise.all([
+    self.registration.showNotification(d.title || 'Adapt Academy', {
+      body: d.body || '',
+      icon: 'icon-192.png',
+      badge: 'icon-192.png',
+      tag: d.tag || undefined,
+      data: { url: d.url || './' }
+    }),
+    // Si la app está abierta, que actualice la campanita sin recargar
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(vs => vs.forEach(v => v.postMessage({ tipo: 'aviso' })))
+  ]));
 });
 
 // Al tocar la notificación se abre (o se trae al frente) la app

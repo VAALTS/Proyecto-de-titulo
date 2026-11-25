@@ -241,3 +241,52 @@ class MensajeForo(models.Model):
 
     def __str__(self):
         return f'{self.autor}: {self.tema}'
+
+
+class Encuesta(models.Model):
+    """Pregunta con opciones que el profesor publica en un curso para que los alumnos voten (RF-11 de la app)."""
+
+    curso = models.ForeignKey(Curso, on_delete=models.PROTECT, related_name='encuestas')
+    autor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='encuestas')
+    titulo = models.CharField('título', max_length=150)
+    pregunta = models.CharField(max_length=300)
+    visible = models.BooleanField(default=True)
+    fecha_creacion = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'encuesta'
+        verbose_name_plural = 'encuestas'
+        ordering = ['-fecha_creacion']
+
+    def __str__(self):
+        return self.titulo
+
+
+class OpcionEncuesta(models.Model):
+    encuesta = models.ForeignKey(Encuesta, on_delete=models.CASCADE, related_name='opciones')
+    texto = models.CharField(max_length=150)
+    orden = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        verbose_name = 'opción de encuesta'
+        verbose_name_plural = 'opciones de encuesta'
+        ordering = ['orden', 'pk']
+
+    def __str__(self):
+        return self.texto
+
+
+class VotoEncuesta(models.Model):
+    """Respuesta de un alumno; puede cambiarla, pero tiene una sola por encuesta."""
+
+    encuesta = models.ForeignKey(Encuesta, on_delete=models.CASCADE, related_name='votos')
+    opcion = models.ForeignKey(OpcionEncuesta, on_delete=models.CASCADE, related_name='votos')
+    alumno = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='votos_encuesta')
+    fecha = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'voto de encuesta'
+        verbose_name_plural = 'votos de encuesta'
+        constraints = [
+            models.UniqueConstraint(fields=['encuesta', 'alumno'], name='voto_unico_por_encuesta'),
+        ]

@@ -1,6 +1,7 @@
 from django.contrib import admin
 
-from .models import BloqueHorario, Clase, Curso, Inscripcion, MensajeForo, Modulo, TemaForo
+from .models import (BloqueHorario, Clase, Curso, Encuesta, Inscripcion, MensajeForo, Modulo, OpcionEncuesta,
+                     TemaForo)
 
 
 @admin.register(Curso)
@@ -44,3 +45,16 @@ class TemaForoAdmin(admin.ModelAdmin):
     list_display = ('titulo', 'curso', 'autor', 'fecha_creacion')
     list_filter = ('curso',)
     inlines = [MensajeForoInline]
+
+
+class OpcionEncuestaInline(admin.TabularInline):
+    model = OpcionEncuesta
+    extra = 0
+
+
+@admin.register(Encuesta)
+class EncuestaAdmin(admin.ModelAdmin):
+    list_display = ('titulo', 'curso', 'visible', 'fecha_creacion')
+    list_filter = ('visible',)
+    search_fields = ('titulo', 'pregunta', 'curso__nombre')
+    inlines = [OpcionEncuestaInline]

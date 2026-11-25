@@ -45,6 +45,8 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
     bloqueado_hasta = models.DateTimeField(null=True, blank=True)
     # Las cuentas creadas por el administrador reciben una contraseña temporal que se debe cambiar (RF-04)
     debe_cambiar_contrasena = models.BooleanField(default=False)
+    # Alumno que también es profesor (o al revés): en la aplicación móvil puede cambiar de perfil
+    doble_rol = models.BooleanField('tiene los dos perfiles (alumno y profesor)', default=False)
 
     is_active = models.BooleanField('activo', default=True)
     # Solo controla el acceso al sitio /admin/ de Django; el rol dentro de la plataforma es `rol`
@@ -79,6 +81,14 @@ class Usuario(AbstractBaseUser, PermissionsMixin):
 
     def get_short_name(self):
         return ' '.join(parte for parte in [self.primer_nombre, self.apellido_paterno] if parte)
+
+    def roles(self):
+        """Perfiles con que puede entrar a la aplicación móvil."""
+        if self.rol == Rol.ADMINISTRADOR:
+            return [Rol.ADMINISTRADOR]
+        if self.doble_rol:
+            return [Rol.ALUMNO, Rol.PROFESOR]
+        return [self.rol]
 
     def esta_bloqueado(self):
         return self.bloqueado_hasta is not None and self.bloqueado_hasta > timezone.now()

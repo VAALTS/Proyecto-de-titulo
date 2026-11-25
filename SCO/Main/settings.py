@@ -193,3 +193,9 @@ EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'True') == 'True'
 EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER or 'Adapt Academy <no-responder@adaptacademy.cl>')
+
+# Notificaciones push de la aplicación móvil (Web Push). Las claves se generan con:
+#   python manage.py generar_claves_push
+VAPID_PUBLIC_KEY = os.environ.get('VAPID_PUBLIC_KEY', '')
+VAPID_PRIVATE_KEY = os.environ.get('VAPID_PRIVATE_KEY', '')
+VAPID_EMAIL = os.environ.get('VAPID_EMAIL', 'no-responder@adaptacademy.cl')

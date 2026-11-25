@@ -31,7 +31,7 @@ class CursoForm(EstiloBootstrapMixin, forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Solo profesores activos; al editar se mantiene el actual aunque su cuenta esté desactivada
-        disponibles = Q(rol=Rol.PROFESOR, is_active=True)
+        disponibles = (Q(rol=Rol.PROFESOR) | Q(rol=Rol.ALUMNO, doble_rol=True)) & Q(is_active=True)
         if self.instance.profesor_id:
             disponibles |= Q(pk=self.instance.profesor_id)
         self.fields['profesor'].queryset = Usuario.objects.filter(disponibles).order_by(
@@ -59,7 +59,7 @@ class InscripcionForm(forms.Form):
         self.curso = curso
         # Alumnos activos que todavía no están inscritos en este curso
         self.fields['alumnos'].queryset = (
-            Usuario.objects.filter(rol=Rol.ALUMNO, is_active=True)
+            Usuario.objects.filter(Q(rol=Rol.ALUMNO) | Q(rol=Rol.PROFESOR, doble_rol=True), is_active=True)
             .exclude(inscripciones__curso=curso, inscripciones__activa=True)
             .order_by('apellido_paterno', 'primer_nombre')
         )

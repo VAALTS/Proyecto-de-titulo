@@ -113,8 +113,10 @@ class CuentaForm(EstiloBootstrapMixin, forms.ModelForm):
 
     class Meta:
         model = Usuario
-        fields = ['rut', 'primer_nombre', 'segundo_nombre', 'apellido_paterno', 'apellido_materno', 'email']
+        fields = ['rut', 'primer_nombre', 'segundo_nombre', 'apellido_paterno', 'apellido_materno', 'email',
+                  'doble_rol']
         labels = {
+            'doble_rol': 'También es alumno y profesor',
             'rut': 'RUT',
             'primer_nombre': 'Nombre',
             'segundo_nombre': 'Segundo nombre',
@@ -132,6 +134,9 @@ class CuentaForm(EstiloBootstrapMixin, forms.ModelForm):
         self.fields['rut'].required = True
         self.fields['apellido_paterno'].required = True
         self.fields['rut'].widget.attrs['placeholder'] = '12.345.678-9'
+        self.fields['doble_rol'].widget.attrs['class'] = 'form-check-input d-block'
+        self.fields['doble_rol'].help_text = ('Podrá inscribirse en cursos como alumno y dictar cursos como profesor, '
+                                              'y cambiar de perfil en la aplicación móvil.')
 
     def clean_rut(self):
         return normalizar_rut(self.cleaned_data['rut'])

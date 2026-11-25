@@ -65,7 +65,8 @@
                             data-rut="{{ cuenta.rut }}" data-primer_nombre="{{ cuenta.primer_nombre }}"
                             data-segundo_nombre="{{ cuenta.segundo_nombre }}"
                             data-apellido_paterno="{{ cuenta.apellido_paterno }}"
-                            data-apellido_materno="{{ cuenta.apellido_materno }}" data-email="{{ cuenta.email }}">
+                            data-apellido_materno="{{ cuenta.apellido_materno }}" data-email="{{ cuenta.email }}"
+                            data-doble_rol="{{ cuenta.doble_rol|yesno:'1,0' }}">
                             <td class="text-nowrap">{{ cuenta.rut }}</td>
                             <td>{{ cuenta.get_full_name }}</td>
                             <td class="d-none d-md-table-cell text-break">{{ cuenta.email }}</td>
@@ -227,7 +228,8 @@
             formEdicion.querySelectorAll('.alert, .invalid-feedback').forEach((error) => error.remove());
             formEdicion.querySelectorAll('.is-invalid').forEach((campo) => campo.classList.remove('is-invalid'));
             formEdicion.querySelectorAll('input[name]:not([type=hidden])').forEach((campo) => {
-                campo.value = fila.dataset[campo.name] || '';
+                if (campo.type === 'checkbox') campo.checked = fila.dataset[campo.name] === '1';
+                else campo.value = fila.dataset[campo.name] || '';
             });
             mostrarEstado(fila.dataset.activo === '1');
             modalEdicion.show();

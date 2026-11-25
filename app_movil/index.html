@@ -1197,14 +1197,14 @@ input,textarea,button{font-family:inherit}
 <div style="flex:none;height:58px;display:flex;align-items:center;gap:6px;padding:0 10px;background:#fff;border-bottom:1px solid #e6e4df">
 <button onClick="{{ closeForm }}" aria-label="Cerrar" style="width:42px;height:42px;border:0;background:none;cursor:pointer;display:grid;place-items:center;color:#1f2328"><span style="font-family:'Material Symbols Rounded';font-size:24px;line-height:1">close</span></button>
 <span style="flex:1;font:600 18px 'Saira'">{{ formTitle }}</span>
-<button onClick="{{ saveForm }}" style="height:40px;padding:0 16px;border:0;border-radius:12px;background:#2e6cc1;color:#fff;font:600 15px 'Figtree';cursor:pointer">{{ formSaveLabel }}</button>
+<button onClick="{{ saveForm }}" disabled="{{ formSaving }}" style="height:40px;padding:0 18px;border:0;border-radius:12px;background:linear-gradient(90deg,#2e6cc1 0%,#c8232a 45%,#f65b47 78%,#e9cf22 100%);text-shadow:0 1px 2px rgba(0,0,0,.25);color:#fff;font:600 15px 'Figtree';cursor:pointer;opacity:{{ formOpacity }}" style-active="transform:scale(.97)">{{ formSaveLabel }}</button>
 </div>
 <div style="flex:1;overflow:auto;padding:18px 18px 40px;display:flex;flex-direction:column;gap:18px">
 <label style="display:flex;flex-direction:column;gap:6px">
 <span style="font-size:13px;font-weight:600;color:#3c4043">{{ formTitleLabel }}</span>
 <input value="{{ form.title }}" onChange="{{ fTitle }}" placeholder="Escribe un título" style="height:50px;padding:0 14px;border:1.5px solid #dcdad5;border-radius:14px;font-size:16px;outline:none;background:#fff" style-focus="border-color:#2e6cc1">
 </label>
-<sc-if value="{{ fIsArchivo }}" hint-placeholder-val="{{ false }}">
+<sc-if value="{{ fShowFileType }}" hint-placeholder-val="{{ false }}">
 <div style="display:flex;flex-direction:column;gap:8px">
 <span style="font-size:13px;font-weight:600;color:#3c4043">Tipo de archivo</span>
 <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -1218,7 +1218,7 @@ input,textarea,button{font-family:inherit}
 <label style="display:flex;align-items:center;gap:12px;padding:14px;border:1.5px dashed #c9c6bf;border-radius:14px;background:#fff;cursor:pointer">
 <span style="font-family:'Material Symbols Rounded';font-size:26px;line-height:1;color:#2e6cc1">upload_file</span>
 <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><span style="font-weight:600;font-size:14.5px;word-break:break-all">{{ fileLabel }}</span><span style="font-size:12.5px;color:#5f6368">{{ fileHint }}</span></div>
-<input type="file" accept=".pdf,.mp4,.mp3,.doc,.docx,.ppt,.pptx,.xls,.xlsx" onChange="{{ onFile }}" style="display:none">
+<input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.jpg,.jpeg,.png,.gif,.zip" onChange="{{ onFile }}" style="display:none">
 </label>
 </sc-if>
 <sc-if value="{{ fIsUrl }}" hint-placeholder-val="{{ false }}">
@@ -1273,6 +1273,17 @@ Opción 2" style="border:1.5px solid #dcdad5;border-radius:14px;padding:12px 14p
 <sc-if value="{{ noFolderItems }}" hint-placeholder-val="{{ false }}"><div style="padding:14px;font-size:13.5px;color:#5f6368">No hay materiales sueltos para agregar.</div></sc-if>
 </div>
 <span style="font-size:12.5px;color:#5f6368">También puedes crear archivos, foros, encuestas o URL nuevos y elegir esta carpeta como ubicación.</span>
+</div>
+</sc-if>
+<sc-if value="{{ fShowClase }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;gap:8px">
+<span style="font-size:13px;font-weight:600;color:#3c4043">Clase donde se publica</span>
+<div style="display:flex;gap:8px;flex-wrap:wrap">
+<sc-for list="{{ claseChips }}" as="c" hint-placeholder-count="2">
+<button onClick="{{ c.click }}" style="height:36px;padding:0 14px;border-radius:18px;border:1.5px solid {{ c.border }};background:{{ c.bg }};color:{{ c.fg }};font:600 13.5px 'Figtree';cursor:pointer;white-space:nowrap">{{ c.label }}</button>
+</sc-for>
+</div>
+<sc-if value="{{ noClases }}" hint-placeholder-val="{{ false }}"><span style="font-size:12.5px;color:#c8232a">Este curso aún no tiene clases. Créalas en la plataforma web (Módulos y clases) para poder publicar archivos, enlaces o carpetas.</span></sc-if>
 </div>
 </sc-if>
 <sc-if value="{{ fShowParent }}" hint-placeholder-val="{{ false }}">
@@ -1905,6 +1916,10 @@ class Component extends DCLogic {
     this._onResize = () => { const m = window.innerWidth < 600; if (m !== this.state.mobile) this.setState({ mobile: m }); };
     window.addEventListener('resize', this._onResize);
     this.restoreSession();
+    // Los datos se actualizan solos: cada minuto y cada vez que se vuelve a abrir la app
+    this._refresh = setInterval(() => { if (document.visibilityState === 'visible') this.refreshData(); }, 60000);
+    this._onVisible = () => { if (document.visibilityState === 'visible') this.refreshData(); };
+    document.addEventListener('visibilitychange', this._onVisible);
     this._clock = setInterval(() => this.forceUpdate(), 60000);
     this._tick = setInterval(() => {
       const s = this.state;
@@ -1914,7 +1929,7 @@ class Component extends DCLogic {
       else this.setState({ now });
     }, 1000);
   }
-  componentWillUnmount() { window.removeEventListener('resize', this._onResize); clearInterval(this._tick); clearInterval(this._clock); clearTimeout(this._toastT); clearTimeout(this._notifT); clearTimeout(this._lp); }
+  componentWillUnmount() { clearInterval(this._refresh); document.removeEventListener('visibilitychange', this._onVisible); window.removeEventListener('resize', this._onResize); clearInterval(this._tick); clearInterval(this._clock); clearTimeout(this._toastT); clearTimeout(this._notifT); clearTimeout(this._lp); }
 
   pad(n) { return String(n).padStart(2, '0'); }
   lockSecs() { return Number(this.props.lockSeconds) || 300; }
@@ -1994,11 +2009,11 @@ class Component extends DCLogic {
   async api(path, opts) {
     opts = opts || {};
     const headers = {};
-    if (opts.body != null) headers['Content-Type'] = 'application/json';
+    if (opts.body != null && !opts.form) headers['Content-Type'] = 'application/json';
     if (opts.auth !== false) headers.Authorization = 'Bearer ' + this.storedToken();
     let r;
     try {
-      r = await fetch(this.apiBase() + '/api/app/' + path, { method: opts.method || (opts.body != null ? 'POST' : 'GET'), headers, body: opts.body != null ? JSON.stringify(opts.body) : undefined });
+      r = await fetch(this.apiBase() + '/api/app/' + path, { method: opts.method || (opts.body != null ? 'POST' : 'GET'), headers, body: opts.form ? opts.body : opts.body != null ? JSON.stringify(opts.body) : undefined });
     } catch (e) {
       const err = new Error('No se pudo conectar con el servidor. Revisa tu conexión a internet.'); err.status = 0; err.data = {}; throw err;
     }
@@ -2043,6 +2058,7 @@ class Component extends DCLogic {
         if (m.tipo === 'enlace') return Object.assign(base, { type: 'url', url: m.url });
         if (m.tipo === 'carpeta') return Object.assign(base, { type: 'carpeta' });
         if (m.tipo === 'actividad') return Object.assign(base, { type: 'actividad', due: m.fecha_limite, webUrl: m.url_web, done: m.entregada, grade: m.nota, form: m.forma });
+        if (m.tipo === 'encuesta') { const ops = m.opciones || [], i = ops.findIndex(o => o.id === m.mi_voto); return Object.assign(base, { type: 'encuesta', question: m.pregunta, options: ops.map(o => o.texto), optionIds: ops.map(o => o.id), votes: ops.map(o => o.votos), myVote: i < 0 ? null : i }); }
         if (m.tipo === 'foro') return Object.assign(base, { type: 'foro', kind: 'Texto', text: m.texto, author: m.autor, comments: (m.comentarios || []).map(x => ({ author: x.autor, when: this.ago(x.fecha), text: x.texto, teacher: x.profesor })) });
         return null;
       }).filter(Boolean);
@@ -2053,7 +2069,12 @@ class Component extends DCLogic {
     const u = d.usuario;
     this.COURSES = COURSES; this.PAL = PAL; this.WEB = d.web || '';
     this.STUDENT = { name: u.nombre, fullName: u.nombre_completo, rut: u.rut || '—', program: '', jornada: '', ingreso: (u.fecha_registro || '').slice(0, 4), id: String(u.id), email: u.email };
-    return { user: { id: String(u.id), email: u.email, name: u.nombre, fullName: u.nombre_completo, rut: u.rut, since: u.fecha_registro, role: u.rol, courses: ids }, materials, grades };
+    this.CLASES = {};
+    Object.keys(d.clases || {}).forEach(k => { this.CLASES['c' + k] = d.clases[k]; });
+    this.PUSH_KEY = d.push || null;
+    const surveyDone = {};
+    Object.keys(materials).forEach(k => materials[k].forEach(m => { if (m.type === 'encuesta' && m.myVote != null) surveyDone[m.id] = m.myVote; }));
+    return { user: { id: String(u.id), email: u.email, name: u.nombre, fullName: u.nombre_completo, rut: u.rut, since: u.fecha_registro, role: u.rol, roles: u.roles || [u.rol], courses: ids }, materials, grades, surveyDone };
   }
 
   async loadData(extra) {
@@ -2062,6 +2083,21 @@ class Component extends DCLogic {
       pending: null, screen: 'home', attempts: 0, password: '', loginMsg: '', loading: false, popup: null,
       courseId: null, materialId: null, tgCourse: st.user.courses[0] || null, tgEval: null, tgDraft: {}, tgError: '', week: 0, schedFilter: 'all'
     }, extra || {}));
+    this.enablePush(false);
+  }
+
+  // Vuelve a pedir los datos sin cambiar de pantalla, para ver lo nuevo que se publicó en la web o en la app
+  async refreshData() {
+    if (!this.state.user || this._refreshing) return;
+    this._refreshing = true;
+    try {
+      const st = this.applyData(await this.api('datos/'));
+      this.setState(x => {
+        const materials = {};
+        Object.keys(st.materials).forEach(k => { materials[k] = st.materials[k].map(m => { const old = (x.materials[k] || []).find(o => o.id === m.id); return old && old.fileUrl ? Object.assign(m, { fileUrl: old.fileUrl }) : m; }); });
+        return { materials, grades: st.grades, user: st.user, surveyDone: Object.assign({}, x.surveyDone, st.surveyDone) };
+      });
+    } catch (e) {} finally { this._refreshing = false; }
   }
 
   async restoreSession() {
@@ -2080,6 +2116,9 @@ class Component extends DCLogic {
     try {
       const r = await this.api('login/', { body: { email: s.email.trim(), password: s.password }, auth: false });
       try { localStorage.setItem('adapt-token', r.token); } catch (e) {}
+      const roles = r.usuario.roles || [r.usuario.rol];
+      // Con los dos perfiles, primero elige con cuál entrar
+      if (roles.length > 1) return this.setState({ loading: false, screen: 'role', pending: r.usuario, password: '', email: '', attempts: 0, popup: null });
       await this.loadData({ email: '' });
     } catch (e) {
       if (e.status === 423) return this.setState({ loading: false, attempts: 0, lockUntil: Date.now() + (e.data.segundos || this.lockSecs()) * 1000, now: Date.now(), popup: 'locked', password: '' });
@@ -2088,9 +2127,61 @@ class Component extends DCLogic {
     }
   }
 
-  enter(key, role, extra) { this.setState(Object.assign({ screen: 'home', rolesOpen: false }, extra || {})); }
+  // Entra (o cambia) al perfil elegido: alumno o profesor
+  async enter(key, role, extra) {
+    this.setState({ rolesOpen: false, loading: true });
+    try {
+      const r = await this.api('rol/', { body: { rol: role } });
+      try { localStorage.setItem('adapt-token', r.token); } catch (e) {}
+      await this.loadData(extra);
+      this.toastMsg(role === 'profesor' ? 'Ingresaste como profesor' : 'Ingresaste como estudiante');
+    } catch (e) { this.setState({ loading: false }); this.toastMsg(e.message); }
+  }
+
+  b64ToBytes(b64) {
+    const pad = '='.repeat((4 - b64.length % 4) % 4), raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+    return Uint8Array.from(raw, c => c.charCodeAt(0));
+  }
+
+  pushSupported() { return !!(this.PUSH_KEY && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window); }
+
+  // Suscribe este teléfono a las notificaciones push. Con ask=true pide el permiso (debe ser al tocar un botón)
+  async enablePush(ask) {
+    if (!this.pushSupported()) {
+      if (ask) this.toastMsg(/iPhone|iPad/.test(navigator.userAgent) ? 'En iPhone, primero agrega la app a tu pantalla de inicio desde Safari' : 'Este teléfono no admite notificaciones');
+      return false;
+    }
+    try {
+      if (Notification.permission === 'default' && ask) await Notification.requestPermission();
+      if (Notification.permission !== 'granted') {
+        if (ask) this.toastMsg('Activa las notificaciones de Adapt Academy en los ajustes del teléfono');
+        return false;
+      }
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: this.b64ToBytes(this.PUSH_KEY) });
+      await this.api('dispositivo/', { body: sub.toJSON() });
+      this.setState({ pushOn: true });
+      if (ask) this.toastMsg('Notificaciones activadas');
+      return true;
+    } catch (e) {
+      if (ask) this.toastMsg('No se pudieron activar las notificaciones');
+      return false;
+    }
+  }
+
+  // Al cerrar sesión, este teléfono deja de recibir los avisos de esa cuenta
+  async disablePush() {
+    try {
+      if (!('serviceWorker' in navigator)) return;
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = reg && await reg.pushManager.getSubscription();
+      if (sub) { await this.api('dispositivo/', { method: 'DELETE', body: { endpoint: sub.endpoint } }); await sub.unsubscribe(); }
+    } catch (e) {}
+  }
 
   logout() {
+    if (this.state.user) this.disablePush();
     try { localStorage.removeItem('adapt-token'); } catch (e) {}
     this.COURSES = {}; this.PAL = {};
     this.setState(Object.assign(this.closedOverlays(), { user: null, pending: null, screen: 'login', recSent: false, recEmail: '', recError: '', materials: {}, grades: {}, loading: false, loginMsg: '', courseId: null }));
@@ -2230,9 +2321,11 @@ class Component extends DCLogic {
         canSubmit: !showRes, submitLabel: 'Enviar respuesta', submitDisabled: sel == null, submitBg: sel == null ? '#c9ced6' : '#2e6cc1',
         submit: () => {
           if (sel == null) return;
-          this.updateMat(m.id, x => { x.votes = x.votes.map((v, i) => i === sel ? v + 1 : v); return x; });
-          this.setState(st => ({ surveyDone: Object.assign({}, st.surveyDone, { [m.id]: sel }) }));
-          this.toastMsg('Respuesta enviada');
+          this.api('encuesta/' + m.pk + '/votar/', { body: { opcion: m.optionIds[sel] } }).then(() => {
+            this.updateMat(m.id, x => { x.votes = x.votes.map((v, i) => i === sel ? v + 1 : v); return x; });
+            this.setState(st => ({ surveyDone: Object.assign({}, st.surveyDone, { [m.id]: sel }) }));
+            this.toastMsg('Respuesta enviada');
+          }).catch(e => this.toastMsg(e.message));
         }
       });
     }
@@ -2405,7 +2498,7 @@ class Component extends DCLogic {
     this.notify('Tu clase comienza en ' + label, 'Recuerde conectarse a la clase de ' + nx.c.name + ' a realizarse a las ' + nx.c.start + ' horas.');
   }
 
-  newForm(type) { return { type, editingId: null, title: '', fileType: 'PDF', fileName: '', size: '', url: 'https://', kind: 'Texto', text: '', question: '', options: '', hidden: false, parent: null, items: {} }; }
+  newForm(type) { this._file = null; return { type, editingId: null, title: '', fileType: 'PDF', fileName: '', size: '', url: 'https://', kind: 'Texto', text: '', question: '', options: '', hidden: false, parent: null, items: {} }; }
   setF(patch) { this.setState(s => ({ form: Object.assign({}, s.form, patch), formError: '' })); }
   editForm(id) {
     const m = this.findMat(id);
@@ -2414,33 +2507,51 @@ class Component extends DCLogic {
     this.setState({ action: null, form: f, formError: '' });
   }
   fmtSize(b) { return b > 1048576 ? (b / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB'; }
-  saveForm() {
-    const s = this.state, f = s.form, cid = s.courseId, err = msg => this.setState({ formError: msg });
+  async saveForm() {
+    const s = this.state, f = s.form, cid = s.courseId, c = this.COURSES[cid], err = msg => this.setState({ formError: msg });
+    if (s.formSaving) return;
     if (!f.title.trim()) return err('El título es obligatorio.');
-    if (f.type === 'archivo' && !f.fileName) return err('Selecciona un archivo para subir.');
+    if (f.editingId) return this.openWebCourse('Edita el material en la plataforma web');
+    if (f.type === 'archivo' && !this._file) return err('Selecciona un archivo para subir.');
     if (f.type === 'url' && !/^https?:\/\/[^\s.]+\.[^\s]+/.test(f.url.trim())) return err('Ingresa una URL válida (https://…).');
-    if (f.type === 'foro' && f.kind !== 'Archivo' && !f.text.trim()) return err('Escribe el contenido del tema.');
-    if (f.type === 'foro' && f.kind === 'Archivo' && !f.fileName) return err('Selecciona el archivo del tema.');
+    if (f.type === 'foro' && !f.text.trim()) return err('Escribe el contenido del tema.');
     const opts = f.options.split('\n').map(x => x.trim()).filter(Boolean);
     if (f.type === 'encuesta' && (!f.question.trim() || opts.length < 2)) return err('La encuesta necesita una pregunta y al menos 2 opciones.');
-    const id = f.editingId || ('n' + Date.now());
-    const base = f.editingId ? this.findMat(id) : { id, comments: [] };
-    const m = Object.assign({}, base, { type: f.type, title: f.title.trim(), hidden: f.hidden, parent: f.type === 'carpeta' ? null : (f.parent || null) });
-    if (f.type === 'archivo') Object.assign(m, { fileType: f.fileType, fileName: f.fileName, size: f.size || '—', fileUrl: f.fileUrl || base.fileUrl || null, fileMime: f.fileMime || base.fileMime || '' });
-    if (f.type === 'url') m.url = f.url.trim();
-    if (f.type === 'foro') Object.assign(m, { kind: f.kind, text: f.text.trim(), fileName: f.fileName, fileUrl: f.fileUrl || base.fileUrl || null, comments: base.comments || [] });
-    if (f.type === 'encuesta') Object.assign(m, { question: f.question.trim(), options: opts, votes: (base.votes && base.votes.length === opts.length) ? base.votes : opts.map(() => 0) });
-    let list = this.list().slice();
-    list = f.editingId ? list.map(x => x.id === id ? m : x) : list.concat([m]);
-    if (f.type === 'carpeta') list = list.map(x => {
-      if (x.id === id) return x;
-      if (f.items[x.id]) return Object.assign({}, x, { parent: id });
-      if (x.parent === id) return Object.assign({}, x, { parent: null });
-      return x;
-    });
-    const exp = Object.assign({}, s.expanded); if (f.type === 'carpeta') exp[id] = true; if (m.parent) exp[m.parent] = true;
-    this.setState({ materials: Object.assign({}, s.materials, { [cid]: list }), form: null, expanded: exp });
-    this.toastMsg((f.editingId ? 'Cambios guardados' : 'Contenido publicado') + (f.hidden ? ' · oculto' : ''));
+    const parent = f.parent ? this.findMat(f.parent) : null;
+    const clase = this.formClase(f);
+    if (['archivo', 'url', 'carpeta'].includes(f.type) && !parent && !clase) return err('Elige la clase donde se publicará.');
+    this.setState({ formSaving: true, formError: '' });
+    try {
+      if (f.type === 'foro') {
+        await this.api('cursos/' + c.pk + '/foros/', { body: { titulo: f.title.trim(), contenido: f.kind === 'Cita' ? '“' + f.text.trim() + '”' : f.text.trim() } });
+      } else if (f.type === 'encuesta') {
+        await this.api('cursos/' + c.pk + '/encuestas/', { body: { titulo: f.title.trim(), pregunta: f.question.trim(), opciones: opts, visible: !f.hidden } });
+      } else {
+        const fd = new FormData();
+        fd.append('tipo', f.type === 'url' ? 'enlace' : f.type);
+        fd.append('titulo', f.title.trim());
+        fd.append('visible', f.hidden ? 'false' : 'true');
+        if (parent) fd.append('carpeta', parent.pk); else fd.append('clase', clase.id);
+        if (f.type === 'url') fd.append('url', f.url.trim());
+        if (f.type === 'archivo') fd.append('archivo', this._file, this._file.name);
+        if (f.type === 'carpeta') Object.keys(f.items).filter(k => f.items[k]).forEach(k => { const m = this.findMat(k); if (m && m.pk) fd.append('items', m.pk); });
+        await this.api('cursos/' + c.pk + '/material/', { method: 'POST', form: true, body: fd });
+      }
+    } catch (e) { return this.setState({ formSaving: false, formError: e.message }); }
+    this._file = null;
+    this.setState({ form: null, formSaving: false });
+    this.toastMsg('Contenido publicado' + (f.hidden ? ' · oculto' : ''));
+    this.refreshData();
+  }
+
+  // Clase elegida en el formulario (por defecto, la última que ya se dictó o la primera que viene)
+  formClase(f) {
+    const clases = this.CLASES[this.state.courseId] || [];
+    if (!clases.length) return null;
+    const elegida = clases.find(x => x.id === f.clase);
+    if (elegida) return elegida;
+    const hoy = new Date().toISOString().slice(0, 10), pasadas = clases.filter(x => x.fecha <= hoy);
+    return pasadas.length ? pasadas[pasadas.length - 1] : clases[0];
   }
 
   formVals() {
@@ -2449,7 +2560,7 @@ class Component extends DCLogic {
     const T = { encuesta: ['Nueva encuesta', 'Editar encuesta', 'Título de la encuesta'], foro: ['Nuevo foro', 'Editar foro', 'Tema del foro'], archivo: ['Nuevo archivo', 'Editar archivo', 'Título del anuncio'], carpeta: ['Nueva carpeta', 'Editar carpeta', 'Nombre de la carpeta'], url: ['Nueva URL', 'Editar URL', 'Título del enlace'] }[f.type];
     const list = this.list(), folders = list.filter(x => x.type === 'carpeta');
     const needsFile = f.type === 'archivo' || (f.type === 'foro' && f.kind === 'Archivo');
-    const items = list.filter(x => x.type !== 'carpeta' && (!x.parent || x.parent === f.editingId)).map(x => {
+    const items = list.filter(x => ['archivo', 'url'].includes(x.type) && (!x.parent || x.parent === f.editingId)).map(x => {
       const on = !!f.items[x.id], mt = this.meta(x);
       return { title: x.title, icon: mt.icon, fg: mt.fg, check: on ? 'check' : '', boxBg: on ? '#2e6cc1' : '#fff', boxBorder: on ? '#2e6cc1' : '#c9c6bf', click: () => this.setF({ items: Object.assign({}, f.items, { [x.id]: !on }) }) };
     });
@@ -2457,10 +2568,14 @@ class Component extends DCLogic {
       formTitle: f.editingId ? T[1] : T[0], formTitleLabel: T[2], formSaveLabel: f.editingId ? 'Guardar' : 'Publicar',
       fIsArchivo: f.type === 'archivo', fIsUrl: f.type === 'url', fIsForo: f.type === 'foro', fIsEncuesta: f.type === 'encuesta', fIsCarpeta: f.type === 'carpeta',
       fNeedsFile: needsFile, fNeedsText: f.type === 'foro' && f.kind !== 'Archivo', fTextLabel: f.kind === 'Cita' ? 'Cita' : 'Contenido del tema',
-      fShowParent: f.type !== 'carpeta' && folders.length > 0,
-      fileLabel: f.fileName || 'Seleccionar archivo', fileHint: f.fileName ? (f.size + ' · toca para cambiarlo') : 'PDF, MP4, MP3, Word, PPT o Excel',
+      fShowParent: ['archivo', 'url'].includes(f.type) && folders.length > 0,
+      fileLabel: f.fileName || 'Seleccionar archivo', fileHint: f.fileName ? (f.size + ' · toca para cambiarlo') : 'PDF, Word, Excel, PPT, imágenes o ZIP (hasta 20 MB). Para videos, usa una URL',
       fileTypeChips: ['PDF', 'MP4', 'MP3', 'Word', 'PPT', 'Excel'].map(t => this.chip(t, f.fileType === t, () => this.setF({ fileType: t }))),
-      kindChips: ['Texto', 'Cita', 'Archivo'].map(k => this.chip(k, f.kind === k, () => this.setF({ kind: k }))),
+      kindChips: ['Texto', 'Cita'].map(k => this.chip(k, f.kind === k, () => this.setF({ kind: k }))),
+      fShowFileType: false, formSaving: !!s.formSaving, formOpacity: s.formSaving ? '.6' : '1',
+      fShowClase: ['archivo', 'url', 'carpeta'].includes(f.type) && !f.parent,
+      noClases: !(this.CLASES[s.courseId] || []).length,
+      claseChips: (this.CLASES[s.courseId] || []).map(x => { const cur = this.formClase(f); return this.chip(x.titulo + ' · ' + x.fecha.slice(8, 10) + '/' + x.fecha.slice(5, 7), !!cur && cur.id === x.id, () => this.setF({ clase: x.id })); }),
       parentChips: [this.chip('Sin carpeta', !f.parent, () => this.setF({ parent: null }))].concat(folders.map(x => this.chip(x.title, f.parent === x.id, () => this.setF({ parent: x.id })))),
       folderItems: items, noFolderItems: items.length === 0,
       swBg: f.hidden ? '#2e6cc1' : '#d6d3cc', swX: f.hidden ? 'translateX(20px)' : 'translateX(0px)'
@@ -2556,8 +2671,8 @@ class Component extends DCLogic {
             this.toastMsg('Dato actualizado');
           } };
       }),
-      roleOptions: [['alumno', 'Estudiante', 'school'], ['exalumno', 'Ex estudiante', 'history_edu'], ['profesor', 'Profesor', 'co_present']].map(o => {
-        const has = s.user.role === o[0], cur = has;
+      roleOptions: [['alumno', 'Estudiante', 'school'], ['profesor', 'Profesor', 'co_present']].map(o => {
+        const has = (s.user.roles || [s.user.role]).includes(o[0]), cur = s.user.role === o[0];
         return { label: o[1], icon: has ? o[2] : 'lock', sub: cur ? 'Sesión iniciada' : has ? 'Cambiar a este perfil' : 'No disponible para esta cuenta',
           border: cur ? '#f65b47' : '#eef0f4', bg: cur ? 'rgba(246,91,71,.06)' : '#fff', fg: has ? '#1f2328' : '#8a8f9c',
           iconBg: cur ? 'linear-gradient(135deg,#ff8a6e,#f65b47)' : '#f4f6fb', iconFg: cur ? '#fff' : '#8a8f9c',
@@ -2697,9 +2812,9 @@ class Component extends DCLogic {
       sw: s.mobile ? '100%' : '390px', sh: s.mobile ? '100dvh' : '844px', sr: s.mobile ? '0' : '50px',
       sbH: s.mobile ? 'env(safe-area-inset-top, 0px)' : '50px', sbVis: s.mobile ? 'hidden' : 'visible', fakeChrome: s.mobile ? 'none' : 'block',
       isLogin: scr === 'login', isRecover: scr === 'recover', isApp: app, isRole: scr === 'role' && !!s.pending,
-      statusBg: app ? '#fff' : 'transparent', pendingName: '',
-      roleButtons: [['alumno', 'Estudiante', 'school', 'estudiante', 'linear-gradient(90deg,#2e6cc1 0%,#c8232a 55%,#f65b47 100%)'], ['exalumno', 'Ex estudiante', 'history_edu', 'ex estudiante', 'linear-gradient(90deg,#e8503c 0%,#f0a020 100%)'], ['profesor', 'Profesor', 'groups', 'profesor', 'linear-gradient(90deg,#c8232a 0%,#f65b47 55%,#e9cf22 100%)']].map(o => {
-        const ok = !!s.pending && this.USERS[s.pending].roles.includes(o[0]);
+      statusBg: app ? '#fff' : 'transparent', pendingName: s.pending ? s.pending.nombre : '',
+      roleButtons: [['alumno', 'Estudiante', 'school', 'estudiante', 'linear-gradient(90deg,#2e6cc1 0%,#c8232a 55%,#f65b47 100%)'], ['profesor', 'Profesor', 'groups', 'profesor', 'linear-gradient(90deg,#c8232a 0%,#f65b47 55%,#e9cf22 100%)']].map(o => {
+        const ok = !!s.pending && (s.pending.roles || [s.pending.rol]).includes(o[0]);
         return { label: o[1], icon: ok ? o[2] : 'lock', roleName: o[3], disabled: !ok, bg: ok ? o[4] : '#e3e5eb', fg: ok ? '#fff' : '#8a8f9c', shadow: ok ? '0 1px 2px rgba(0,0,0,.25)' : 'none', cursor: ok ? 'pointer' : 'not-allowed', click: () => { if (ok) this.enter(s.pending, o[0]); } };
       }),
       isHome: app && scr === 'home', isStudent: app && !prof, showStudentNav: app && !this.isAlumni() && (prof ? ['home', 'courses', 'course', 'schedule', 'profile'] : ['home', 'courses', 'course', 'schedule', 'grades', 'profile']).includes(scr), showTabsHeader: false, isStudentHome: app && !prof && !this.isAlumni() && scr === 'home', isAlumniHome: app && this.isAlumni() && scr === 'home',
@@ -2710,7 +2825,7 @@ class Component extends DCLogic {
       pickCourses: prof ? this.userCourses().map(id => { const c = this.COURSES[id], p = this.PAL[id]; return { name: c.name, abbr: this.initialsOf(c.name), grad: 'linear-gradient(135deg,' + p.a + ',' + p.b + ')', sub: this.list(id).length + ' materiales publicados', click: () => this.setState({ pickCourse: false, courseId: id, screen: 'course', addOpen: true }) }; }) : [],
       ...(app && !prof && scr === 'home' ? this.studentHomeVals() : { pending: [], avgRows: [], nextClass: {} }),
       goCourses: () => this.setState({ screen: 'courses' }), goSchedule: () => this.setState({ screen: 'schedule' }), goGrades: () => this.setState({ screen: 'grades' }),
-      bell: () => prof ? this.remindTeacher() : this.isAlumni() ? this.notify('Comunidad de egresados', 'Tus certificados de título y egreso están disponibles para descarga en cualquier momento.') : this.remindActivity('1 día'),
+      bell: () => this.pushSupported() && !s.pushOn ? this.enablePush(true) : prof ? this.remindTeacher() : this.isAlumni() ? this.notify('Comunidad de egresados', 'Tus certificados de título y egreso están disponibles para descarga en cualquier momento.') : this.remindActivity('1 día'),
       popTop: '116px', popBottom: 'auto', popMax: '690px',
       bottomNav: [['Inicio', 'home', 'home', '#2e6cc1', '#8db8f2'], ['Cursos', 'courses', 'menu_book', '#c8232a', '#ff8a8f'], ['Horario', 'schedule', 'calendar_month', '#e8503c', '#ffa48f'], ['Notas', 'grades', 'grade', '#a88f00', '#f2dc4a']].map(b => {
         const on = b[1] === 'courses' ? (scr === 'courses' || inCourse) : scr === b[1];
@@ -2736,7 +2851,7 @@ class Component extends DCLogic {
         this.setState({ requests: [q].concat(s.requests), reqSheet: false, reqDesc: '' });
         this.toastMsg('Solicitud ' + q.id + ' enviada');
       }, rolesOpen: app && s.rolesOpen,
-      openRoles: () => {}, closeRoles: () => this.setState({ rolesOpen: false }),
+      openRoles: () => this.setState({ rolesOpen: true }), closeRoles: () => this.setState({ rolesOpen: false }),
       editPhoto: () => this.toastMsg('Cambiar foto: disponible próximamente'),
       contactBtnBg: this.contactUsed() ? '#e3e5eb' : 'linear-gradient(90deg,#2e6cc1 0%,#c8232a 45%,#f65b47 78%,#e9cf22 100%)', contactBtnFg: this.contactUsed() ? '#8a8f9c' : '#fff', contactShadow: this.contactUsed() ? 'none' : '0 1px 2px rgba(0,0,0,.25)',
 
@@ -2788,7 +2903,7 @@ class Component extends DCLogic {
       course: c ? { name: c.name, stripes: this.stripes(c.color), sub: (prof ? c.students + ' alumnos' : 'Prof. ' + c.teacher) + ' · ' + this.daysText(c) + ' ' + c.start + '–' + c.end } : {},
       rows, noRows: scr === 'course' && rows.length === 0,
       goCourse: () => this.setState({ screen: 'course' }),
-      openAdd: () => this.openWebCourse('Para subir material, usa la plataforma web'), addOpen: app && s.addOpen, closeAdd: () => this.setState({ addOpen: false }),
+      openAdd: () => this.setState({ addOpen: true }), addOpen: app && s.addOpen, closeAdd: () => this.setState({ addOpen: false }),
       addOptions: [
         ['encuesta', 'Encuesta', 'Pregunta con opciones para que los alumnos voten'],
         ['foro', 'Foro', 'Tema de discusión con comentarios públicos'],
@@ -2813,6 +2928,8 @@ class Component extends DCLogic {
       toggleHidden: () => this.setF({ hidden: !(s.form && s.form.hidden) }), formError: s.formError,
       onFile: e => {
         const file = e.target.files && e.target.files[0]; if (!file) return;
+        if (file.size > 20 * 1024 * 1024) return this.setState({ formError: 'El archivo pesa más de 20 MB. Para videos, publica una URL.' });
+        this._file = file;
         const map = { pdf: 'PDF', mp4: 'MP4', mov: 'MP4', mp3: 'MP3', doc: 'Word', docx: 'Word', ppt: 'PPT', pptx: 'PPT', xls: 'Excel', xlsx: 'Excel' };
         const ext = file.name.split('.').pop().toLowerCase();
         if (s.form && s.form.fileUrl) URL.revokeObjectURL(s.form.fileUrl);
@@ -2826,8 +2943,10 @@ class Component extends DCLogic {
       doToggle: async () => {
         const m = actM, h = !m.hidden;
         this.setState({ action: null });
-        if (m.type === 'foro' || m.type === 'actividad') return this.openWebCourse('Los foros y actividades se gestionan en la plataforma web');
-        try { await this.api('material/' + m.pk + '/visibilidad/', { body: { visible: !h } }); } catch (e) { return this.toastMsg(e.message); }
+        if (m.type === 'foro') return this.toastMsg('Los foros siempre son visibles para el curso');
+        if (m.type === 'actividad') return this.openWebCourse('Las actividades se gestionan en la plataforma web');
+        const ruta = m.type === 'encuesta' ? 'encuesta/' : 'material/';
+        try { await this.api(ruta + m.pk + '/visibilidad/', { body: { visible: !h } }); } catch (e) { return this.toastMsg(e.message); }
         this.updateMat(m.id, x => { x.hidden = h; return x; });
         this.toastMsg(h ? 'Material oculto para los alumnos' : 'Material visible para los alumnos');
       },
@@ -2838,8 +2957,9 @@ class Component extends DCLogic {
       confirmDelete: async () => {
         const id = s.confirmDel, cid = s.courseId, m = delM;
         this.setState({ confirmDel: null });
-        if (m.type === 'foro' || m.type === 'actividad') return this.openWebCourse('Los foros y actividades se eliminan en la plataforma web');
-        try { await this.api('material/' + m.pk + '/', { method: 'DELETE' }); } catch (e) { return this.toastMsg(e.message); }
+        if (m.type === 'actividad') return this.openWebCourse('Las actividades se eliminan en la plataforma web');
+        const ruta = m.type === 'encuesta' ? 'encuesta/' : m.type === 'foro' ? 'foro/' : 'material/';
+        try { await this.api(ruta + m.pk + '/', { method: 'DELETE' }); } catch (e) { return this.toastMsg(e.message); }
         this.setState(x => ({ materials: Object.assign({}, x.materials, { [cid]: x.materials[cid].filter(y => y.id !== id) }) }));
         this.toastMsg('Material eliminado');
       },

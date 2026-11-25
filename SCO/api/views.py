@@ -6,6 +6,7 @@ con el mismo correo y contraseña, y lo que se registra en un lado se ve de inme
 from datetime import datetime, time
 
 from django import forms
+from django.conf import settings
 from django.contrib.auth.models import update_last_login
 from django.core.cache import cache
 from django.core.mail import send_mail
@@ -15,14 +16,16 @@ from django.http import FileResponse
 from django.urls import reverse
 from django.utils import timezone
 
-from cursos.models import BloqueHorario, Curso, Inscripcion, Material, MensajeForo, TemaForo
+from cursos.forms import MaterialForm
+from cursos.models import (BloqueHorario, Clase, Curso, Encuesta, Inscripcion, Material, MensajeForo, OpcionEncuesta,
+                           TemaForo, VotoEncuesta)
 from cursos.views_alumno import cursos_del_alumno
 from cursos.views_foro import puede_usar_foro
 from cursos.views_profesor import puede_descargar
 from evaluaciones.calculos import calificaciones_del_alumno, resumen_del_curso
 from evaluaciones.forms import NotaField
 from evaluaciones.models import Actividad, Calificacion, Entrega
-from notificaciones.models import SolicitudContacto
+from notificaciones.models import Dispositivo, SolicitudContacto
 from usuarios.cuentas import asignar_clave_temporal
 from usuarios.forms import LoginForm
 from usuarios.models import Rol, Usuario
@@ -60,6 +63,7 @@ def datos_usuario(usuario):
         'nombre_completo': usuario.get_full_name(),
         'rut': usuario.rut or '',
         'rol': usuario.rol,
+        'roles': usuario.roles(),
         'fecha_registro': usuario.fecha_registro.date().isoformat(),
     }
 
@@ -145,6 +149,28 @@ def foros_del_curso(curso, usuario):
     return salida
 
 
+def encuestas_del_curso(curso, usuario, es_profesor):
+    encuestas = list(curso.encuestas.prefetch_related('opciones'))
+    if not es_profesor:
+        encuestas = [e for e in encuestas if e.visible]
+    votos = dict(VotoEncuesta.objects.filter(encuesta__curso=curso)
+                 .values('opcion_id').annotate(n=Count('id')).values_list('opcion_id', 'n'))
+    mios = dict(VotoEncuesta.objects.filter(encuesta__curso=curso, alumno=usuario)
+                .values_list('encuesta_id', 'opcion_id'))
+    return [{
+        'id': f'e{e.pk}', 'pk': e.pk, 'tipo': 'encuesta', 'titulo': e.titulo, 'pregunta': e.pregunta,
+        'visible': e.visible, 'carpeta': None, 'mi_voto': mios.get(e.pk),
+        'opciones': [{'id': o.pk, 'texto': o.texto, 'votos': votos.get(o.pk, 0)} for o in e.opciones.all()],
+    } for e in encuestas]
+
+
+def clases_del_curso(curso):
+    """Clases donde el profesor puede publicar material desde la app."""
+    return [{'id': c.pk, 'titulo': c.titulo, 'fecha': c.fecha.isoformat(), 'modulo': c.modulo.nombre}
+            for c in Clase.objects.filter(modulo__curso=curso).select_related('modulo')
+            .order_by('fecha', 'hora_inicio')]
+
+
 def bloques_por_curso(cursos):
     bloques = {}
     for b in BloqueHorario.objects.filter(curso__in=cursos).order_by('dia_semana', 'hora_inicio'):
@@ -210,7 +236,8 @@ def datos(request):
     usuario = request.usuario_api
     es_profesor = usuario.rol == Rol.PROFESOR
     salida = {'usuario': datos_usuario(usuario), 'web': request.build_absolute_uri('/'),
-              'cursos': [], 'contenido': {}, 'notas': {}}
+              'push': settings.VAPID_PUBLIC_KEY or None,
+              'cursos': [], 'contenido': {}, 'notas': {}, 'clases': {}}
 
     if es_profesor:
         cursos = list(Curso.objects.activos().filter(profesor=usuario).select_related('profesor')
@@ -220,7 +247,9 @@ def datos(request):
             salida['cursos'].append(datos_curso(curso, bloques.get(curso.pk, []), alumnos=curso.inscritos))
             salida['contenido'][curso.pk] = (materiales_del_curso(request, curso, True)
                                              + actividades_del_curso(request, curso, None, True)
-                                             + foros_del_curso(curso, usuario))
+                                             + foros_del_curso(curso, usuario)
+                                             + encuestas_del_curso(curso, usuario, True))
+            salida['clases'][curso.pk] = clases_del_curso(curso)
             inscripciones = curso.inscripciones.filter(activa=True).select_related('alumno').order_by(
                 'alumno__apellido_paterno', 'alumno__primer_nombre')
             resumen = resumen_del_curso(curso, inscripciones)
@@ -245,7 +274,8 @@ def datos(request):
                                             asistencia=porcentaje_asistencia(inscripcion)))
         salida['contenido'][curso.pk] = (materiales_del_curso(request, curso, False)
                                          + actividades_del_curso(request, curso, inscripcion, False)
-                                         + foros_del_curso(curso, usuario))
+                                         + foros_del_curso(curso, usuario)
+                                         + encuestas_del_curso(curso, usuario, False))
     for resumen in calificaciones_del_alumno(usuario):
         salida['notas'][resumen['curso'].pk] = {
             'evaluaciones': [{'id': f['actividad'].pk, 'nombre': f['actividad'].titulo,
@@ -378,4 +408,175 @@ def contacto(request):
                 message=f'{usuario.get_full_name()} ({usuario.email}, {usuario.get_rol_display()}) escribió desde la '
                         f'aplicación móvil:\n\n{texto}',
                 from_email=None, recipient_list=administradores)
+    return {'ok': True}
+
+
+# ---------- perfil activo (cuentas con los dos perfiles) ----------
+
+@endpoint(['POST'], roles=[Rol.ALUMNO, Rol.PROFESOR])
+def cambiar_rol(request):
+    """Cambia entre el perfil de alumno y el de profesor, solo si la cuenta tiene los dos."""
+    usuario = request.usuario_api
+    rol = str(leer_json(request).get('rol', ''))
+    if rol not in usuario.roles() or rol == Rol.ADMINISTRADOR:
+        return error('Esta cuenta no tiene ese perfil.', 403)
+    usuario.rol = rol
+    return {'token': crear_token(usuario, rol), 'usuario': datos_usuario(usuario)}
+
+
+# ---------- notificaciones push ----------
+
+@endpoint(['POST', 'DELETE'], roles=[Rol.ALUMNO, Rol.PROFESOR])
+def dispositivo(request):
+    """Registra (POST) o quita (DELETE) la suscripción push de este teléfono."""
+    datos_ = leer_json(request)
+    endpoint_ = str(datos_.get('endpoint', ''))[:500]
+    if not endpoint_.startswith('https://'):
+        return error('Suscripción no válida.')
+    if request.method == 'DELETE':
+        Dispositivo.objects.filter(endpoint=endpoint_, usuario=request.usuario_api).delete()
+        return {'ok': True}
+    claves = datos_.get('keys') or {}
+    if not claves.get('p256dh') or not claves.get('auth'):
+        return error('Suscripción no válida.')
+    Dispositivo.objects.update_or_create(endpoint=endpoint_, defaults={
+        'usuario': request.usuario_api, 'p256dh': str(claves['p256dh'])[:200], 'auth': str(claves['auth'])[:100]})
+    return {'ok': True}
+
+
+# ---------- profesor: publicar desde la app (RF-11 de la app) ----------
+
+def curso_del_profesor(request, pk):
+    return Curso.objects.activos().filter(pk=pk, profesor=request.usuario_api).first()
+
+
+def primer_error(form):
+    for errores in form.errors.values():
+        return errores[0]
+    return 'Revisa los datos ingresados.'
+
+
+@endpoint(['POST'], roles=[Rol.PROFESOR])
+def crear_material(request, pk):
+    """Archivo, enlace o carpeta en una clase del curso, con las mismas reglas que la web (multipart/form-data)."""
+    curso = curso_del_profesor(request, pk)
+    if not curso:
+        return error('Curso no encontrado.', 404)
+    datos_ = request.POST
+    carpeta = None
+    if datos_.get('carpeta'):
+        carpeta = Material.objects.filter(pk=datos_['carpeta'], tipo=Material.Tipo.CARPETA,
+                                          clase__modulo__curso=curso).first()
+        if not carpeta:
+            return error('La carpeta elegida no existe.')
+    clase = carpeta.clase if carpeta else Clase.objects.filter(pk=datos_.get('clase') or 0,
+                                                               modulo__curso=curso).first()
+    if not clase:
+        return error('Elige la clase donde se publicará el material.')
+    tipo = datos_.get('tipo')
+    if tipo not in Material.Tipo.values:
+        return error('Tipo de material no válido.')
+    material = Material(clase=clase, carpeta=carpeta, subido_por=request.usuario_api,
+                        visible=datos_.get('visible', 'true') != 'false')
+    form = MaterialForm({'tipo': tipo, 'titulo': datos_.get('titulo', ''), 'url': datos_.get('url', '')},
+                        request.FILES, instance=material)
+    if not form.is_valid():
+        return error(primer_error(form))
+    with transaction.atomic():
+        material = form.save()
+        if tipo == Material.Tipo.CARPETA:
+            # Materiales sueltos de la misma clase que el profesor eligió guardar en la carpeta
+            elegidos = [int(i) for i in datos_.getlist('items') if str(i).isdigit()]
+            Material.objects.filter(pk__in=elegidos, clase=clase, carpeta__isnull=True).exclude(
+                tipo=Material.Tipo.CARPETA).update(carpeta=material)
+    return {'ok': True, 'id': material.pk}
+
+
+@endpoint(['POST'], roles=[Rol.PROFESOR])
+def crear_foro(request, pk):
+    """Tema del foro del curso con su primer mensaje."""
+    curso = curso_del_profesor(request, pk)
+    if not curso:
+        return error('Curso no encontrado.', 404)
+    datos_ = leer_json(request)
+    titulo = str(datos_.get('titulo', '')).strip()
+    contenido = str(datos_.get('contenido', '')).strip()
+    if not titulo or len(titulo) > 150:
+        return error('El tema necesita un título de hasta 150 caracteres.')
+    if not contenido or len(contenido) > 5000:
+        return error('Escribe el contenido del tema (hasta 5.000 caracteres).')
+    with transaction.atomic():
+        tema = TemaForo.objects.create(curso=curso, autor=request.usuario_api, titulo=titulo)
+        MensajeForo.objects.create(tema=tema, autor=request.usuario_api, contenido=contenido)
+    return {'ok': True, 'id': tema.pk}
+
+
+@endpoint(['DELETE'], roles=[Rol.PROFESOR])
+def eliminar_foro(request, pk):
+    tema = TemaForo.objects.filter(pk=pk, curso__profesor=request.usuario_api, curso__activo=True).first()
+    if not tema:
+        return error('Tema no encontrado.', 404)
+    tema.delete()
+    return {'ok': True}
+
+
+@endpoint(['POST'], roles=[Rol.PROFESOR])
+def crear_encuesta(request, pk):
+    curso = curso_del_profesor(request, pk)
+    if not curso:
+        return error('Curso no encontrado.', 404)
+    datos_ = leer_json(request)
+    titulo = str(datos_.get('titulo', '')).strip()
+    pregunta = str(datos_.get('pregunta', '')).strip()
+    opciones = [str(o).strip()[:150] for o in (datos_.get('opciones') or []) if str(o).strip()]
+    if not titulo or len(titulo) > 150:
+        return error('La encuesta necesita un título de hasta 150 caracteres.')
+    if not pregunta or len(pregunta) > 300:
+        return error('Escribe la pregunta (hasta 300 caracteres).')
+    if not 2 <= len(opciones) <= 10:
+        return error('La encuesta necesita entre 2 y 10 opciones.')
+    with transaction.atomic():
+        encuesta = Encuesta.objects.create(curso=curso, autor=request.usuario_api, titulo=titulo,
+                                           pregunta=pregunta, visible=datos_.get('visible', True) is not False)
+        OpcionEncuesta.objects.bulk_create(OpcionEncuesta(encuesta=encuesta, texto=texto, orden=i)
+                                           for i, texto in enumerate(opciones))
+    return {'ok': True, 'id': encuesta.pk}
+
+
+def encuesta_del_profesor(request, pk):
+    return Encuesta.objects.filter(pk=pk, curso__profesor=request.usuario_api, curso__activo=True).first()
+
+
+@endpoint(['POST'], roles=[Rol.PROFESOR])
+def encuesta_visibilidad(request, pk):
+    encuesta = encuesta_del_profesor(request, pk)
+    if not encuesta:
+        return error('Encuesta no encontrada.', 404)
+    datos_ = leer_json(request)
+    encuesta.visible = bool(datos_['visible']) if 'visible' in datos_ else not encuesta.visible
+    encuesta.save(update_fields=['visible'])
+    return {'ok': True, 'visible': encuesta.visible}
+
+
+@endpoint(['DELETE'], roles=[Rol.PROFESOR])
+def eliminar_encuesta(request, pk):
+    encuesta = encuesta_del_profesor(request, pk)
+    if not encuesta:
+        return error('Encuesta no encontrada.', 404)
+    encuesta.delete()
+    return {'ok': True}
+
+
+@endpoint(['POST'], roles=[Rol.ALUMNO])
+def votar_encuesta(request, pk):
+    encuesta = Encuesta.objects.filter(pk=pk, visible=True, curso__activo=True,
+                                       curso__inscripciones__alumno=request.usuario_api,
+                                       curso__inscripciones__activa=True).first()
+    if not encuesta:
+        return error('Encuesta no encontrada.', 404)
+    opcion = encuesta.opciones.filter(pk=leer_json(request).get('opcion') or 0).first()
+    if not opcion:
+        return error('Elige una de las opciones.')
+    VotoEncuesta.objects.update_or_create(encuesta=encuesta, alumno=request.usuario_api,
+                                          defaults={'opcion': opcion})
     return {'ok': True}

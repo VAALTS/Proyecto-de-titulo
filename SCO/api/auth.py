@@ -19,8 +19,10 @@ SAL_TOKEN = 'api.app-movil.token'
 DURACION_TOKEN = 60 * 60 * 24 * 7  # 7 días
 
 
-def crear_token(usuario):
-    return signing.dumps({'id': usuario.pk, 'h': usuario.get_session_auth_hash()[:16]}, salt=SAL_TOKEN)
+def crear_token(usuario, rol=None):
+    """Token del usuario con el perfil con que entra (alumno o profesor, si tiene los dos)."""
+    return signing.dumps({'id': usuario.pk, 'h': usuario.get_session_auth_hash()[:16], 'r': rol or usuario.rol},
+                         salt=SAL_TOKEN)
 
 
 def usuario_del_token(token):
@@ -31,6 +33,13 @@ def usuario_del_token(token):
     usuario = Usuario.objects.filter(pk=datos.get('id'), is_active=True).first()
     if usuario is None or not constant_time_compare(usuario.get_session_auth_hash()[:16], datos.get('h', '')):
         return None
+    rol = datos.get('r', usuario.rol)
+    if rol not in usuario.roles():
+        return None
+    # Perfil activo en la app. Solo cambia el objeto en memoria (las reglas de permisos de la web leen
+    # `usuario.rol`); este objeto nunca se guarda con save(), así que el rol de la base no cambia.
+    usuario.rol_guardado = usuario.rol
+    usuario.rol = rol
     return usuario
 
 

@@ -15,7 +15,7 @@ from django.utils import timezone
 
 from cursos.forms import CursoForm, InscripcionForm
 from cursos.models import Asistencia, BloqueHorario, Encuesta, Material, MensajeForo, TemaForo, VotoEncuesta
-from evaluaciones.models import Actividad, Calificacion
+from evaluaciones.models import Actividad, Calificacion, Entrega
 from notificaciones.models import Dispositivo, Notificacion, RecordatorioEnviado
 from usuarios.forms import CuentaForm
 from usuarios.models import Rol, Usuario
@@ -200,6 +200,9 @@ class NotificacionesTests(ApiTestCase):
     @mock.patch('notificaciones.push.webpush')
     def test_recordatorios_de_entrega_y_de_clase_una_sola_vez(self, webpush):
         ahora = timezone.localtime()
+        # La clase de ejemplo pasa a ayer, para que no cuente el aviso de "terminó la clase"
+        self.clase.fecha = ahora.date() - timedelta(days=1)
+        self.clase.save()
         Actividad.objects.create(clase=self.clase, titulo='Informe', ponderacion=Decimal('30'),
                                  fecha_limite=timezone.now() + timedelta(hours=2))
         inicio = (ahora + timedelta(minutes=20)).replace(second=0, microsecond=0)
@@ -290,3 +293,67 @@ class AsistenciaEnLaAppTests(ApiTestCase):
         self.assertEqual(curso['asistencia'], 25)
         self.assertEqual((detalle['total'], detalle['presentes'], detalle['ausentes']), (4, 1, 1))
         self.assertEqual([c['estado'] for c in detalle['clases']], ['presente', 'ausente', 'proxima', 'proxima'])
+
+
+class AvisosAlProfesorTests(ApiTestCase):
+
+    def test_entrega_nueva_avisa_al_profesor(self):
+        actividad = Actividad.objects.create(clase=self.clase, titulo='Prueba 1', ponderacion=Decimal('20'),
+                                             fecha_limite=timezone.now() + timedelta(days=1))
+        Entrega.objects.create(actividad=actividad, inscripcion=self.inscripcion)
+        aviso = Notificacion.objects.get(usuario=self.profesor)
+        self.assertEqual(aviso.titulo, 'Nueva entrega en Prevención de riesgos')
+        self.assertEqual(aviso.cuerpo, 'Ana Pérez entregó «Prueba 1».')
+        # Al alumno solo le llegó el aviso de la actividad nueva, no el de la entrega
+        self.assertEqual(list(Notificacion.objects.filter(usuario=self.alumno).values_list('titulo', flat=True)),
+                         ['Nueva actividad en Prevención de riesgos'])
+
+    def test_cierre_de_actividad_una_sola_vez(self):
+        actividad = Actividad.objects.create(clase=self.clase, titulo='Informe', ponderacion=Decimal('20'),
+                                             fecha_limite=timezone.now() - timedelta(minutes=5))
+        Entrega.objects.create(actividad=actividad, inscripcion=self.inscripcion)
+        Notificacion.objects.all().delete()
+        for _ in range(2):
+            call_command('enviar_recordatorios', stdout=mock.Mock())
+        aviso = Notificacion.objects.get(usuario=self.profesor, titulo='Cerró «Informe»')
+        self.assertEqual(aviso.cuerpo, 'Prevención de riesgos: 1 de 1 alumnos entregaron · 1 por calificar.')
+
+
+class AvisosDeCursoTests(ApiTestCase):
+
+    def titulos(self, usuario):
+        return list(Notificacion.objects.filter(usuario=usuario).order_by('pk').values_list('titulo', flat=True))
+
+    def test_inscripcion_avisa_al_alumno_y_al_profesor(self):
+        Notificacion.objects.all().delete()
+        self.curso.inscripciones.create(alumno=self.otro)
+        self.assertEqual(self.titulos(self.otro), ['Te inscribieron en un curso'])
+        self.assertEqual(self.titulos(self.profesor), ['Nuevo alumno en Prevención de riesgos'])
+
+    def test_clase_nueva_cambiada_y_cancelada(self):
+        from cursos.models import Clase
+        Notificacion.objects.all().delete()
+        clase = Clase.objects.create(modulo=self.clase.modulo, titulo='Uso de EPP', fecha=timezone.localdate(),
+                                     hora_inicio=time(15), hora_fin=time(16))
+        clase.titulo = 'Uso de EPP (sin cambio de hora)'
+        clase.save()
+        clase.hora_inicio = time(14)
+        clase.save()
+        clase.delete()
+        self.assertEqual(self.titulos(self.alumno), ['Nueva clase en Prevención de riesgos',
+                                                     'Cambió una clase de Prevención de riesgos',
+                                                     'Se canceló una clase de Prevención de riesgos'])
+
+    def test_profesor_recibe_aviso_al_terminar_la_clase(self):
+        from cursos.models import Clase
+        ahora = timezone.localtime()
+        if ahora.hour < 1:
+            self.skipTest('Muy temprano para una clase que ya terminó hoy')
+        Clase.objects.create(modulo=self.clase.modulo, titulo='Cierre', fecha=ahora.date(), hora_inicio=time(0, 0),
+                             hora_fin=time(0, 30))
+        Notificacion.objects.all().delete()
+        call_command('enviar_recordatorios', stdout=mock.Mock())
+        call_command('enviar_recordatorios', stdout=mock.Mock())
+        avisos = Notificacion.objects.filter(usuario=self.profesor, titulo='Terminó la clase «Cierre»')
+        self.assertEqual(avisos.count(), 1)
+        self.assertIn('Recuerda registrar la asistencia', avisos.get().cuerpo)

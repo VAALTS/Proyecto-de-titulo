@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from cursos.models import BloqueHorario, Clase, Curso, Inscripcion, Material, MensajeForo, Modulo, TemaForo
 from evaluaciones.models import Actividad, Calificacion
-from notificaciones.models import SolicitudContacto
+from notificaciones.models import Notificacion, SolicitudContacto
 from usuarios.models import Rol, Usuario
 
 CLAVE = 'clave-segura-123'
@@ -36,6 +36,8 @@ class ApiTestCase(TestCase):
         modulo = Modulo.objects.create(curso=self.curso, nombre='Unidad 1')
         self.clase = Clase.objects.create(modulo=modulo, titulo='Clase 1', fecha=timezone.localdate(),
                                           hora_inicio=time(9), hora_fin=time(10))
+        # Crear el curso de ejemplo genera avisos; cada prueba parte con la bandeja vacía
+        Notificacion.objects.all().delete()
 
     def post(self, nombre, datos, token=None, args=None, metodo='post'):
         extra = {'HTTP_AUTHORIZATION': f'Bearer {token}'} if token else {}

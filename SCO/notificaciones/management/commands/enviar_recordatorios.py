@@ -2,6 +2,8 @@
 
 - RF-07: actividad pendiente, cuando falta 1 día, 12 horas, 3 horas y 1 hora para la entrega.
 - RF-08: próxima clase, 1 hora, 30 minutos y 5 minutos antes (según el horario semanal del curso).
+- Al profesor, cuando vence el plazo de una actividad: cuántos entregaron y cuántas faltan por calificar.
+- Al profesor, cuando termina una clase: que terminó y, si falta, que registre la asistencia.
 
 Uso:
     python manage.py enviar_recordatorios            # revisa una vez
@@ -18,8 +20,8 @@ from django.core.management.base import BaseCommand
 from django.db import IntegrityError, close_old_connections, transaction
 from django.utils import timezone
 
-from cursos.models import BloqueHorario, Inscripcion
-from evaluaciones.models import Actividad, Entrega
+from cursos.models import Asistencia, BloqueHorario, Clase, Inscripcion
+from evaluaciones.models import Actividad, Calificacion, Entrega
 
 from ...models import RecordatorioEnviado
 from ...push import enviar, guardar_en_bandeja
@@ -107,9 +109,50 @@ def recordatorios_de_clases(ahora):
     return enviados
 
 
+def cierres_de_actividades(ahora):
+    """Resumen al profesor de las actividades que cerraron en las últimas 24 horas (una vez por actividad)."""
+    enviados = 0
+    actividades = (Actividad.objects.filter(clase__modulo__curso__activo=True, fecha_limite__lte=ahora,
+                                            fecha_limite__gt=ahora - timedelta(days=1))
+                   .select_related('clase__modulo__curso'))
+    for actividad in actividades:
+        curso = actividad.clase.modulo.curso
+        if not marcar(curso.profesor_id, f'cierre-{actividad.pk}'):
+            continue
+        inscritos = Inscripcion.objects.filter(curso=curso, activa=True).count()
+        entregas = Entrega.objects.filter(actividad=actividad, inscripcion__activa=True).count()
+        calificadas = Calificacion.objects.filter(actividad=actividad, inscripcion__activa=True).count()
+        por_calificar = max(entregas - calificadas, 0)
+        enviados += avisar(
+            curso.profesor_id, f'Cerró «{actividad.titulo}»',
+            f'{curso.nombre}: {entregas} de {inscritos} alumnos entregaron'
+            + (f' · {por_calificar} por calificar.' if por_calificar else '.'),
+            etiqueta=f'cierre-{actividad.pk}')
+    return enviados
+
+
+def clases_terminadas(ahora):
+    """Avisa al profesor cuando termina una clase de hoy; si falta la asistencia, se lo recuerda."""
+    enviados = 0
+    local = timezone.localtime(ahora)
+    clases = (Clase.objects.filter(fecha=local.date(), hora_fin__lte=local.time(), modulo__curso__activo=True)
+              .select_related('modulo__curso'))
+    for clase in clases:
+        curso = clase.modulo.curso
+        if not marcar(curso.profesor_id, f'fin-clase-{clase.pk}'):
+            continue
+        falta_asistencia = not Asistencia.objects.filter(clase=clase).exists()
+        enviados += avisar(
+            curso.profesor_id, f'Terminó la clase «{clase.titulo}»',
+            f'{curso.nombre}. ' + ('Recuerda registrar la asistencia.' if falta_asistencia else 'La asistencia ya está registrada.'),
+            etiqueta=f'fin-clase-{clase.pk}')
+    return enviados
+
+
 def revisar():
     ahora = timezone.now()
-    return recordatorios_de_actividades(ahora) + recordatorios_de_clases(ahora)
+    return (recordatorios_de_actividades(ahora) + recordatorios_de_clases(ahora) + cierres_de_actividades(ahora)
+            + clases_terminadas(ahora))
 
 
 class Command(BaseCommand):

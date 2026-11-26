@@ -12,11 +12,36 @@
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from cursos.models import Asistencia, BloqueHorario, Clase, Curso, Encuesta, Inscripcion, Material, MensajeForo
 from evaluaciones.models import Actividad, Calificacion, Entrega
 
 from .push import notificar
+
+
+def hora(valor):
+    """HH:MM, venga la hora como objeto o como texto ("09:00")."""
+    return valor.strftime('%H:%M') if hasattr(valor, 'strftime') else str(valor)[:5]
+
+
+def dia(valor):
+    """DD/MM, venga la fecha como objeto o como texto ("2026-12-02")."""
+    if hasattr(valor, 'strftime'):
+        return valor.strftime('%d/%m')
+    partes = str(valor).split('-')
+    return f'{partes[2][:2]}/{partes[1]}' if len(partes) == 3 else str(valor)
+
+
+def fecha_y_hora(valor):
+    """DD/MM a las HH:MM en hora de Chile, venga como objeto o como texto."""
+    if isinstance(valor, str):
+        valor = parse_datetime(valor)
+        if valor is None:
+            return ''
+    if timezone.is_naive(valor):
+        valor = timezone.make_aware(valor)
+    return f'{timezone.localtime(valor):%d/%m a las %H:%M}'
 
 
 def alumnos_del_curso(curso_id):
@@ -60,9 +85,8 @@ def actividad_publicada(sender, instance, created, **kwargs):
     if not recien_visible or not instance.visible:
         return
     curso = instance.clase.modulo.curso
-    limite = timezone.localtime(instance.fecha_limite)
     notificar(alumnos_del_curso(curso.pk), f'Nueva actividad en {curso.nombre}',
-                   f'{instance.titulo} · entrega el {limite:%d/%m a las %H:%M}', etiqueta=f'actividad-{instance.pk}')
+                   f'{instance.titulo} · entrega el {fecha_y_hora(instance.fecha_limite)}', etiqueta=f'actividad-{instance.pk}')
 
 
 @receiver(post_save, sender=Encuesta)
@@ -115,7 +139,7 @@ def asistencia_registrada(sender, instance, created, **kwargs):
     estado = 'presente' if instance.presente else 'ausente'
     notificar([instance.inscripcion.alumno_id], f'Asistencia: {estado}',
               f'Quedaste {estado} en la clase «{clase.titulo}» de {clase.modulo.curso.nombre} '
-              f'del {clase.fecha:%d/%m}.', etiqueta=f'asistencia-{instance.pk}')
+              f'del {dia(clase.fecha)}.', etiqueta=f'asistencia-{instance.pk}')
 
 
 @receiver(post_save, sender=Entrega)
@@ -138,12 +162,12 @@ def clase_antes(sender, instance, **kwargs):
 @receiver(post_save, sender=Clase)
 def clase_programada(sender, instance, created, **kwargs):
     antes = getattr(instance, '_antes', None)
-    cambio = antes is not None and (antes['fecha'], antes['hora_inicio'], antes['hora_fin']) != (
-        instance.fecha, instance.hora_inicio, instance.hora_fin)
+    cambio = antes is not None and (str(antes['fecha']), hora(antes['hora_inicio']), hora(antes['hora_fin'])) != (
+        str(instance.fecha), hora(instance.hora_inicio), hora(instance.hora_fin))
     if not created and not cambio:
         return
     curso = instance.modulo.curso
-    cuando = f'el {instance.fecha:%d/%m} de {instance.hora_inicio:%H:%M} a {instance.hora_fin:%H:%M}'
+    cuando = f'el {dia(instance.fecha)} de {hora(instance.hora_inicio)} a {hora(instance.hora_fin)}'
     if created:
         notificar(alumnos_del_curso(curso.pk), f'Nueva clase en {curso.nombre}', f'«{instance.titulo}» {cuando}.',
                   etiqueta=f'clase-{instance.pk}')
@@ -156,7 +180,7 @@ def clase_programada(sender, instance, created, **kwargs):
 def clase_cancelada(sender, instance, **kwargs):
     curso = instance.modulo.curso
     notificar(alumnos_del_curso(curso.pk), f'Se canceló una clase de {curso.nombre}',
-              f'«{instance.titulo}» del {instance.fecha:%d/%m} ya no se realizará.')
+              f'«{instance.titulo}» del {dia(instance.fecha)} ya no se realizará.')
 
 
 DIAS = ['', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo']
@@ -167,7 +191,7 @@ def horario_actualizado(sender, instance, created, **kwargs):
     curso = instance.curso
     lugar = f' en {instance.sala}' if instance.sala else ''
     notificar(alumnos_del_curso(curso.pk), f'Horario {"nuevo" if created else "actualizado"} en {curso.nombre}',
-              f'Los {DIAS[instance.dia_semana]} de {instance.hora_inicio:%H:%M} a {instance.hora_fin:%H:%M}{lugar}.',
+              f'Los {DIAS[instance.dia_semana]} de {hora(instance.hora_inicio)} a {hora(instance.hora_fin)}{lugar}.',
               etiqueta=f'horario-{curso.pk}')
 
 
@@ -176,7 +200,7 @@ def horario_eliminado(sender, instance, **kwargs):
     curso = Curso.objects.filter(pk=instance.curso_id).first()
     if curso:
         notificar(alumnos_del_curso(curso.pk), f'Cambió el horario de {curso.nombre}',
-                  f'Ya no hay clases los {DIAS[instance.dia_semana]} a las {instance.hora_inicio:%H:%M}.',
+                  f'Ya no hay clases los {DIAS[instance.dia_semana]} a las {hora(instance.hora_inicio)}.',
                   etiqueta=f'horario-{curso.pk}')
 
 

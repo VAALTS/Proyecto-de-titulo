@@ -428,7 +428,7 @@ input,textarea,button{font-family:inherit}
 <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">
 <div style="padding:10px 8px;border-radius:14px;background:#f4f6fb;display:flex;flex-direction:column;align-items:center;gap:1px"><span style="font:600 18px 'Saira'">{{ c.students }}</span><span style="font-size:11px;color:#5f6368">Alumnos</span></div>
 <div style="padding:10px 8px;border-radius:14px;background:#f4f6fb;display:flex;flex-direction:column;align-items:center;gap:1px"><span style="font:600 18px 'Saira'">{{ c.mats }}</span><span style="font-size:11px;color:#5f6368">Materiales</span></div>
-<div style="padding:10px 8px;border-radius:14px;background:{{ c.avgBg }};display:flex;flex-direction:column;align-items:center;gap:1px"><span style="font:600 18px 'Saira';color:{{ c.avgFg }}">{{ c.avg }}</span><span style="font-size:11px;color:{{ c.avgFg }}">Promedio</span></div>
+<div style="padding:10px 8px;border-radius:14px;background:{{ c.avgBg }};display:flex;flex-direction:column;align-items:center;gap:1px"><span style="font:600 18px 'Saira';color:{{ c.avgFg }}">{{ c.avg }}</span><span style="font-size:11px;line-height:1.2;text-align:center;color:{{ c.avgFg }}">Promedio del curso</span></div>
 </div>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
 <button onClick="{{ c.open }}" style="height:42px;border-radius:21px;border:1.5px solid #e3e6ee;background:#fff;color:#3c4043;font:600 14px 'Figtree';display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer"><span style="font-family:'Material Symbols Rounded';font-size:18px;line-height:1;">folder_open</span>Materiales</button>

@@ -506,7 +506,7 @@ input,textarea,button{font-family:inherit}
 <sc-for list="{{ homeCourses }}" as="c" hint-placeholder-count="3">
 <button onClick="{{ c.open }}" style="flex:none;display:flex;flex-direction:column;text-align:left;padding:0;border:1px solid #e6e4df;border-radius:18px;background:#fff;overflow:hidden;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.04)" style-active="transform:scale(.985)">
 <div style="height:118px;width:100%;background:{{ c.stripes }};display:flex;align-items:flex-end;padding:10px 12px">
-<span style="font:500 10.5px ui-monospace,Menlo,monospace;color:#3c4043;background:rgba(255,255,255,.85);padding:3px 6px;border-radius:5px;white-space:nowrap">imagen referencial del curso</span>
+
 </div>
 <div style="padding:14px 16px 16px;display:flex;flex-direction:column;gap:4px;width:100%">
 <span style="font:600 18px 'Saira';color:#1f2328">{{ c.name }}</span>
@@ -522,7 +522,7 @@ input,textarea,button{font-family:inherit}
 <div style="flex:1;overflow:auto;padding-bottom:120px">
 <div style="padding:8px 10px 0"><button onClick="{{ goCourses }}" style="display:flex;align-items:center;gap:2px;height:40px;padding:0 10px 0 2px;border:0;background:none;color:#63666e;font:600 15px 'Figtree';cursor:pointer"><span style="font-family:'Material Symbols Rounded';font-size:26px;line-height:1">chevron_left</span>Cursos</button></div>
 <div style="padding:4px 18px 16px;display:flex;flex-direction:column;gap:12px">
-<div style="height:92px;border-radius:16px;background:{{ course.stripes }};display:flex;align-items:flex-end;padding:10px 12px"><span style="font:500 10.5px ui-monospace,Menlo,monospace;color:#3c4043;background:rgba(255,255,255,.85);padding:3px 6px;border-radius:5px;white-space:nowrap">imagen referencial del curso</span></div>
+<div style="height:92px;border-radius:16px;background:{{ course.stripes }};display:flex;align-items:flex-end;padding:10px 12px"></div>
 <div>
 <h1 style="margin:0;font:600 25px 'Saira'">{{ course.name }}</h1>
 <p style="margin:2px 0 0;color:#5f6368;font-size:14px">{{ course.sub }}</p>
@@ -3071,7 +3071,7 @@ class Component extends DCLogic {
       addOptions: [
         ['encuesta', 'Encuesta', 'Pregunta con opciones para que los alumnos voten'],
         ['foro', 'Foro', 'Tema de discusión con comentarios públicos'],
-        ['archivo', 'Archivo', 'PDF, video, audio, Word, PPT o Excel con título'],
+        ['archivo', 'Archivo', 'PDF, Word, Excel, PPT, imágenes o ZIP (hasta 20 MB)'],
         ['carpeta', 'Carpeta', 'Agrupa materiales nuevos o existentes'],
         ['url', 'URL', 'Enlace o hipervínculo externo']
       ].map(o => { const mt = this.meta({ type: o[0], fileType: 'PDF' }); return { label: o[1], desc: o[2], icon: o[0] === 'archivo' ? 'upload_file' : mt.icon, tint: o[0] === 'archivo' ? '#2e6cc11c' : mt.tint, fg: o[0] === 'archivo' ? '#2e6cc1' : mt.fg, click: () => this.setState({ addOpen: false, form: this.newForm(o[0]), formError: '' }) }; }),

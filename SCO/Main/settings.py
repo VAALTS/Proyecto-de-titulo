@@ -193,9 +193,6 @@ EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'True') == 'True'
 EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER or 'Adapt Academy <no-responder@adaptacademy.cl>')
-# En Railway (planes Trial y Hobby) el SMTP está bloqueado: se envía con la API HTTPS de Brevo.
-# EMAIL_BACKEND=notificaciones.correo.BrevoEmailBackend y BREVO_API_KEY=<clave de API de Brevo>
-BREVO_API_KEY = os.environ.get('BREVO_API_KEY', '')
 
 # Notificaciones push de la aplicación móvil (Web Push). Las claves se generan con:
 #   python manage.py generar_claves_push

@@ -38,21 +38,10 @@ Para generar la `SECRET_KEY`, en tu computador ejecuta:
 python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
 ```
 
-**Correo (para que lleguen las contraseñas temporales).** Railway bloquea el SMTP (Gmail) en los planes
-Trial y Hobby, así que se usa la API de Brevo (gratis hasta 300 correos al día), que funciona por HTTPS:
-
-1. Crea una cuenta en brevo.com y, en **Remitentes**, verifica el correo que enviará los mensajes.
-2. En **SMTP y API → Claves API**, crea una clave.
-3. Agrega en Railway:
-
-```
-EMAIL_BACKEND=notificaciones.correo.BrevoEmailBackend
-BREVO_API_KEY=<clave de API de Brevo>
-DEFAULT_FROM_EMAIL=Adapt Academy <correo-verificado@gmail.com>
-```
-
-Para la demo, las cuentas de prueba pueden usar alias de Gmail (`tucorreo+juan@gmail.com`,
-`tucorreo+profe@gmail.com`): cada uno es un correo distinto para el sistema, pero todos llegan a tu bandeja.
+**Contraseñas temporales.** Las cuentas usan sus correos reales y no se configura envío de correos:
+cuando el administrador crea una cuenta o usa "Reenviar contraseña", el correo con la contraseña temporal
+queda escrito en los registros de Railway (**Deployments → View logs → Deploy Logs**, buscar
+`Contraseña temporal`). Railway bloquea el envío por SMTP (Gmail) en los planes Trial y Hobby.
 
 ## 4. Disco para los archivos subidos
 
